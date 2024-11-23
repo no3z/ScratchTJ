@@ -65,7 +65,7 @@ int deck_init(struct deck *deck, struct rt *rt,
 void deck_clear(struct deck *deck);
 
 bool deck_is_locked(const struct deck *deck);
-
+void load_track(struct deck *d, struct track *track);
 void deck_recue(struct deck *deck);
 void deck_clone(struct deck *deck, const struct deck *from);
 void deck_unset_cue(struct deck *deck, unsigned int label);

@@ -5,7 +5,17 @@
 #include <unistd.h>
 #include <string.h>
 #include "track.h"
+#include "recording.h"
 
+#define MAX_INPUT_SOURCES 10
+
+InputSource inputSources[MAX_INPUT_SOURCES];
+int inputSourceCount = 0;
+static int nextRecordingNumber = 0;
+
+RecordingContext recordingContext;
+
+bool jogPitchModeEnabled;
 // Externals
 extern bool needsUpdate;
 extern MainMenuState mainMenuState;
@@ -40,8 +50,7 @@ static int loadFileMenuSize = sizeof(loadFileMenuItems) / sizeof(MenuItem);
 // Settings menu items
 static MenuItem settingsMenuItems[] = {
     {"1. Jog Pitch Mode", action_jog_pitch},
-    {"2. Stop Pitch Mode", action_jog_stop},
-    {"3. Toggle Jog Reverse", action_jog_reverse},
+    {"2. Toggle Jog Reverse", action_jog_reverse},
 };
 
 static int settingsMenuSize = sizeof(settingsMenuItems) / sizeof(MenuItem);
@@ -62,12 +71,16 @@ void display_deck_menu(struct deck *d, int deck_no) {
                 display_menu(settingsMenuItems, settingsMenuSize, selectedItem, "Settings");
                 break;
             case DECK_MENU_ADJUST_VOLUME:
-                lcdClear(lcdHandle);
-                lcdPosition(lcdHandle, 0, 0);
-                lcdPrintf(lcdHandle, "Volume: %.2f", d->player.setVolume);
+                adjust_volume(d, deck_no);
                 break;
             case DECK_MENU_INFO:
                 display_deck_info(d, deck_no);
+                break;
+            case DECK_MENU_RECORD_INPUT_SOURCE:
+                display_input_sources_menu(inputSources, inputSourceCount, selectedItem, "Select Input");
+                break;
+            case DECK_MENU_RECORDING:
+                display_recording_status(d, deck_no);
                 break;
             default:
                 break;
@@ -96,6 +109,12 @@ void handle_deck_menu_navigation(struct deck *d, int deckno) {
                 currentDeckMenuState = DECK_MENU_MAIN;
                 needsUpdate = true;
             }
+            break;
+        case DECK_MENU_RECORD_INPUT_SOURCE:
+            handle_record_input_sources_navigation(d, deckno);
+            break;
+        case DECK_MENU_RECORDING:
+            handle_recording_navigation(d, deckno);
             break;
         default:
             break;
@@ -168,15 +187,28 @@ void enter_deck_info_display(struct deck *d, int deckno) {
 void adjust_volume(struct deck *d, int deckno) {
     int movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
-
+    int new_volume = (d->player.volume*100);
     if (movement != 0) {
-        d->player.setVolume += movement * 0.05; // Adjust sensitivity as needed
-        if (d->player.setVolume < 0.0) d->player.setVolume = 0.0;
-        if (d->player.setVolume > 1.0) d->player.setVolume = 1.0;
-        needsUpdate = true;
-    }
+        // Adjust volume with sensitivity and ensure it stays within [0.0, 1.0]
+         new_volume = new_volume + movement; // Adjust step size as needed
 
+        if (new_volume < 0) new_volume = 0;
+        if (new_volume > 100) new_volume = 100;
+
+        // Update the player's volume
+        player_set_volume(&d->player, new_volume);
+
+
+    }
+        // Update the display to reflect the new volume
+        lcdClear(lcdHandle);
+        lcdPosition(lcdHandle, 0, 0);
+        lcdPrintf(lcdHandle, "Volume: %d", new_volume);
+
+        needsUpdate = false; // Trigger the UI update
+    // Handle button press
     if (button_press == 1 || button_press == 2) {
+        // Return to the main menu on button press
         currentDeckMenuState = DECK_MENU_MAIN;
         needsUpdate = true;
     }
@@ -185,51 +217,127 @@ void adjust_volume(struct deck *d, int deckno) {
 // Actions for load file menu
 void action_start_stop(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_STARTSTOP, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_next_file(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_NEXTFILE, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_prev_file(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_PREVFILE, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_random_file(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_RANDOMFILE, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_next_folder(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_NEXTFOLDER, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_prev_folder(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_PREVFOLDER, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
 void action_record(struct deck *d, int deckno) {
-    trigger_io_event_no_param(ACTION_RECORD, 0);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    inputSourceCount = get_available_input_sources(inputSources, MAX_INPUT_SOURCES);
+
+    if (inputSourceCount == 0) {
+        // Handle the case when no input sources are found
+        printf("No input sources available.\n");
+        currentDeckMenuState = DECK_MENU_LOAD_FILE; // Go back to Load File menu
+        needsUpdate = true;
+        return;
+    }
+
+    // Enter the Recording Input Sources menu
+    currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
+    selectedItem = 0;
+    needsUpdate = true;
 }
 
-// Actions for settings menu
+void action_select_input_source(struct deck *d, int deckno) {
+    // Get the selected input source
+    InputSource *selectedSource = &inputSources[selectedItem];
+
+    // Generate the filename
+    char filename[256];
+    snprintf(filename, sizeof(filename), "/home/no3z/samples/temp/rec%06d.raw", nextRecordingNumber++);
+    // Assuming nextRecordingNumber is a static variable or member variable
+
+    // Start recording with the selected input source
+    printf("Deck %d: Recording from %s (%s)...\n", deckno + 1, selectedSource->name, selectedSource->device);
+
+    if (start_recording( &recordingContext, selectedSource->device, filename) == 0) {
+        // Recording started successfully
+        needsUpdate = true;
+
+        // Enter the Recording state
+        currentDeckMenuState = DECK_MENU_RECORDING;
+        needsUpdate = true;
+    } else {
+        // Failed to start recording
+        printf("Failed to start recording.\n");
+        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE; // Return to input sources menu
+        needsUpdate = true;
+    }
+}
+
+void handle_record_input_sources_navigation(struct deck *d, int deckno) {
+    int encoder_movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
+
+    if (encoder_movement != 0) {
+        selectedItem = (selectedItem + encoder_movement + inputSourceCount) % inputSourceCount;
+        needsUpdate = true;
+    }
+
+    if (button_press == 1) { // Short press to select an input source
+        action_select_input_source(d, deckno);
+        needsUpdate = true;
+    }
+
+    if (button_press == 2) { // Long press to go back to Load File Menu
+        currentDeckMenuState = DECK_MENU_LOAD_FILE;
+        selectedItem = 0;
+        needsUpdate = true;
+    }
+}
+
+void handle_recording_navigation(struct deck *d, int deckno) {
+    int button_press = rotary_button_pressed();
+
+    if (button_press == 1) { // Short press to stop recording
+        printf("Deck %d: Stopping recording.\n", deckno + 1);
+        stop_recording(d,&recordingContext);
+        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE; // Return to input sources menu
+        needsUpdate = true;
+    } else if (button_press == 2) { // Long press to go back to Load File menu
+        stop_recording(d,&recordingContext);
+        currentDeckMenuState = DECK_MENU_LOAD_FILE;
+        selectedItem = 0;
+        needsUpdate = true;
+    }
+}
+
+
 void action_jog_pitch(struct deck *d, int deckno) {
-    printf("Deck %d: Triggering Jog Pitch...\n", deckno + 1);
-    trigger_io_event_no_param(ACTION_JOGPIT, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
+    jogPitchModeEnabled = !jogPitchModeEnabled; // Toggle the mode
+    printf("Deck %d: Jog Pitch Mode %s\n", deckno + 1, jogPitchModeEnabled ? "Enabled" : "Disabled");
+    if(jogPitchModeEnabled)
+        trigger_io_event_no_param(ACTION_JOGPIT, deckno);
+    else
+        trigger_io_event_no_param(ACTION_JOGPSTOP, deckno);
+    currentDeckMenuState = DECK_MENU_SETTINGS;
+    needsUpdate = true;
 }
 
-void action_jog_stop(struct deck *d, int deckno) {
-    printf("Deck %d: Triggering Jog Stop...\n", deckno + 1);
-    trigger_io_event_no_param(ACTION_JOGPSTOP, deckno);
-    currentDeckMenuState = DECK_MENU_MAIN;
-}
 
 void action_jog_reverse(struct deck *d, int deckno) {
     printf("Deck %d: Triggering Jog Reverse...\n", deckno + 1);
@@ -247,4 +355,19 @@ void display_deck_info(struct deck *d, int deckno) {
 
     lcdPosition(lcdHandle, 0, 1);
     lcdPrintf(lcdHandle, "%.2f/%.2f", player_get_position(&d->player), player_get_remain(&d->player));
+}
+
+void display_input_sources_menu(InputSource *sources, int sourceCount, int selectedItem, const char *title) {
+    lcdClear(lcdHandle);
+    lcdPosition(lcdHandle, 0, 0);
+    lcdPrintf(lcdHandle, "%s", title);
+    lcdPosition(lcdHandle, 0, 1);
+    lcdPrintf(lcdHandle, "%d. %s", selectedItem + 1, sources[selectedItem].name);
+}
+
+void display_recording_status(struct deck *d, int deck_no) {
+    lcdClear(lcdHandle);
+    lcdPosition(lcdHandle, 0, 0);
+    lcdPrintf(lcdHandle, "Recording...");
+    // Optionally, display recording time or other info
 }

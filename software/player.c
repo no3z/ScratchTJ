@@ -518,6 +518,14 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	{
 		diff = pl->position - pl->target_position;
 		float target_pitch_multiplier;
+
+		// Original Buffer Size (B_{\text{original}}): 256
+		// New Buffer Size (B_{\text{new}}): 1024
+// Scaling Factor:
+
+// Scaling Factor=𝐵original/𝐵new=256/1024=0.25
+// Scaling Factor=40×0.25=10
+
 		get_variable_value("target_pitch", &target_pitch_multiplier);
 
 		target_pitch = (-diff) * target_pitch_multiplier;

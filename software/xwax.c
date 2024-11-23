@@ -312,8 +312,8 @@ int main(int argc, char *argv[])
 
 	rate = 48000;
 
-	alsa_init(&deck[0].device, "hw:1,0", rate, scsettings.buffersize, 0);
-	alsa_init(&deck[1].device, "hw:1,0", rate, scsettings.buffersize, 1);
+	alsa_init(&deck[0].device, "plughw:1,0", rate, scsettings.buffersize, 0);
+	alsa_init(&deck[1].device, "plughw:1,0", rate, scsettings.buffersize, 1);
 
 	deck_init(&deck[0], &rt, importer, 1.0, false, false, 0);
 	deck_init(&deck[1], &rt, importer, 1.0, false, false, 1);
@@ -364,7 +364,7 @@ int main(int argc, char *argv[])
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
 	float platterspeed = 3072.0f;
-	float target_pitch = 10.0f;
+	float target_pitch = 10.0f; //for a 1024 buffer size
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);

@@ -777,12 +777,12 @@ void *SC_InputThread(void *ptr)
 		{
 			lastTime = tv.tv_sec;
 			// printf("\033[H\033[J"); // Clear Screen
-			printf("\nFPS: %06u - ADCS: %04u, %04u, %04u, %04u, %04u\nButtons: %01u,%01u,%01u,%01u,%01u\nTP: %f, P : %f\n\nTP: %f, P : %f\n%f -- %f\n",
-				   frameCount, ADCs[0], ADCs[1], ADCs[2], ADCs[3], deck[1].encoderAngle,
-				   buttons[0], buttons[1], buttons[2], buttons[3], capIsTouched,
-				   deck[0].player.target_position, deck[0].player.position,
-				   deck[1].player.target_position, deck[1].player.position,					
-				   deck[0].player.volume, deck[1].player.volume);
+			// printf("\nFPS: %06u - ADCS: %04u, %04u, %04u, %04u, %04u\nButtons: %01u,%01u,%01u,%01u,%01u\nTP: %f, P : %f\n\nTP: %f, P : %f\n%f -- %f\n",
+			// 	   frameCount, ADCs[0], ADCs[1], ADCs[2], ADCs[3], deck[1].encoderAngle,
+			// 	   buttons[0], buttons[1], buttons[2], buttons[3], capIsTouched,
+			// 	   deck[0].player.target_position, deck[0].player.position,
+			// 	   deck[1].player.target_position, deck[1].player.position,					
+			// 	   deck[0].player.volume, deck[1].player.volume);
 			
 			//dump_maps();
 
@@ -790,10 +790,10 @@ void *SC_InputThread(void *ptr)
 			frameCount = 0;
 
 			// list midi devices
-			for (int cunt = 0; cunt < numControllers; cunt++)
-			{
-				printf("MIDI : %s\n", ((struct dicer *)(midiControllers[cunt].local))->PortName);
-			}
+			// for (int cunt = 0; cunt < numControllers; cunt++)
+			// {
+			// 	printf("MIDI : %s\n", ((struct dicer *)(midiControllers[cunt].local))->PortName);
+			// }
 
 			// Wait 10 seconds to enumerate MIDI devices
 			// Give them a little time to come up properly

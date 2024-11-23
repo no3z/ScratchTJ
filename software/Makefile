@@ -41,7 +41,7 @@ DOCDIR ?= $(PREFIX)/share/doc
 
 # Build flags
 
-CFLAGS ?= -O3
+CFLAGS ?= -O3 
 CFLAGS += -Wall -g
 CPPFLAGS += -MMD
 LDFLAGS ?= -O3 -g
@@ -61,6 +61,8 @@ OBJS = controller.o \
 	thread.o \
 	track.o \
 	alsa.o \
+	recording.o \
+	alsa_mixer.o \
 	sc_input.o \
 	sc_playlist.o \
 	sc_midimap.o \

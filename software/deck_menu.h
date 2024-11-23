@@ -6,11 +6,14 @@
 // Enumeration for deck menu states
 typedef enum {
     DECK_MENU_MAIN,
-    DECK_MENU_ADJUST_VOLUME,
     DECK_MENU_LOAD_FILE,
     DECK_MENU_SETTINGS,
-    DECK_MENU_INFO
+    DECK_MENU_ADJUST_VOLUME,
+    DECK_MENU_INFO,
+    DECK_MENU_RECORD_INPUT_SOURCE, // State for selecting input source
+    DECK_MENU_RECORDING            // State for recording in progress
 } DeckMenuState;
+
 
 // Structure for menu items
 typedef struct {
