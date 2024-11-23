@@ -527,21 +527,17 @@ void read_serial_data() {
                 // Parse the fader and encoder values
                 int fader_value, encoder_value, capacitive_value;
                 if (sscanf(line_buffer, "%d %d %d", &fader_value, &encoder_value, &capacitive_value) == 3) {
-                    ADCs[0] = fader_value;
-					ADCs[1] = 1023-fader_value;
-					ADCs[2] = fader_value;
-					ADCs[3] = 1023-fader_value;
+                    ADCs[0] = 1023-fader_value;
+					ADCs[1] = fader_value;
+					ADCs[2] = 1023-fader_value;
+					ADCs[3] = fader_value;
 					capIsTouched = 0;
 					encoder_value = 4096 - encoder_value;
 
-					if(abs(encoder_value-deck[1].newEncoderAngle) > 250 )
-					{
-						capIsTouched=1;
-					} 
 					if (capacitive_value > 5000) {
 						capIsTouched = 1; // Set touched if capacitance exceeds threshold
 					} 
-                    // printf("Fader: %d, Encoder: %d Capcitative: %d Touched: %d diff: %d\n", ADCs[0], encoder_value, capacitive_value, capIsTouched, abs(encoder_value-deck[1].newEncoderAngle) > 250 );
+                    // printf("Fader: %d, Encoder: %d Capcitative: %d Touched: %d diff: %d\n", ADCs[0], encoder_value, capacitive_value, capIsTouched,  (abs(encoder_value - deck[1].newEncoderAngle) > )  );
 
                     deck[1].newEncoderAngle = encoder_value;
                 } else {
@@ -768,7 +764,7 @@ void *SC_InputThread(void *ptr)
 			deck[0].player.pitch = 1;
 
 		deck_random_file(&deck[0]);
-		deck_random_file(&deck[1]);
+		// deck_random_file(&deck[1]);
 
 	while (1) // Main input loop
 	{

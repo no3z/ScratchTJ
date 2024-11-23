@@ -123,7 +123,7 @@ void loadSettings()
 	if (fp == NULL)
 	{
 		// load internal copy instead
-		fp = fopen("/home/no3z/Code/SC1000/software/scsettings.txt", "r");
+		fp = fopen("/home/no3z/ScratchTJ/software/scsettings.txt", "r");
 	}
 
 
@@ -356,25 +356,28 @@ int main(int argc, char *argv[])
 	// 	}
 	// }
 
-	deck_load_folder(&deck[0], "/home/no3z/Code/beats");
-	deck_load_folder(&deck[1], "/home/no3z/Code/samples");	
+	deck_load_folder(&deck[0], "/home/no3z/beats");
+	deck_load_folder(&deck[1], "/home/no3z/samples");	
 
-	float input_curveFactor = 0.4f;
-	float input_curvePower = 1.0f;
+	float input_curveFactor = 0.1f;
+	float input_curvePower = 0.2f;
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
-	float platterspeed = 2275.0f;
+	float platterspeed = 3072.0f;
+	float target_pitch = 10.0f;
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
-	register_variable("slippiness", &slippiness, 0.f, 3000.0f, 5.0f);
-    register_variable("brakespeed", &brakespeed, 0.f, 10000.0f, 500.0f);
-	register_variable("platterspeed", &platterspeed, 1.f, 4096.0f, 8.f);
+	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
+	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
+    register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
+	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
 
+	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));
 
 	if (!deck[1].filesPresent)
 	{
 		// Load the default sentence if no sample files found on usb stick
-		player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/Code/samples/scratchsentence.mp3"));
+		player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/Code/samples/scratch.wav"));
 		cues_load_from_file(&deck[1].cues, deck[1].player.track->path);
 		// Set the time back a bit so the sample doesn't start too soon
 		deck[1].player.target_position = -4.0;

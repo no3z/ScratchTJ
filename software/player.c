@@ -517,8 +517,10 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	else
 	{
 		diff = pl->position - pl->target_position;
+		float target_pitch_multiplier;
+		get_variable_value("target_pitch", &target_pitch_multiplier);
 
-		target_pitch = (-diff) * 40;
+		target_pitch = (-diff) * target_pitch_multiplier;
 	}
 	pl->oldCapTouch = pl->capTouch;
 
