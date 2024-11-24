@@ -1,120 +1,107 @@
-# Scratch TinkerJ -> a fork of SC1000
-# WIP stuff
-## Open-source portable digital scratch instrument
 
-This github holds source code and CAM files for the SC1000.
+# ScratchTJ: Tinkering a DIY Digital Turntable with Raspberry Pi 
 
-The SC1000 is a portable digital scratch instrument which loads samples and beats from a USB stick. At less than the size of three stacked DVD cases, it’s probably the smallest integrated portablist solution ever. Despite this, the software and hardware have been carefully tuned and optimised, and it’s responsive enough for even the most complex scratch patterns.
+Hey there! Welcome to **ScratchTJ**, a project born out of curiosity and a passion for music and tinkering. This is all about turning a Raspberry Pi into a DIY digital turntable that lets you scratch like a pro DJ, using affordable and repurposed hardware. Let's dive into how this all came together.
 
-The device, including its enclosure, uses no custom parts apart from printed circuit boards. It will be possible for anyone with a bit of electronics know-how to build one, and I hope other makers in the portablist scene will be interested in manufacturing some.
+## Table of Contents
 
-The build tutorial video can be found here : https://www.youtube.com/watch?v=t1wy7IFSynY
+- [The Spark of Inspiration](#the-spark-of-inspiration)
+- [Discovering the SC1000 and The_Rasteri's Work](#discovering-the-sc1000-and-the_rasteris-work)
+- [Adapting Code for Raspberry Pi 2](#adapting-code-for-raspberry-pi-2)
+- [Getting Xwax Up and Running](#getting-xwax-up-and-running)
+- [Adding an LCD Menu System](#adding-an-lcd-menu-system)
+- [Upgrading with Hardware Controls](#upgrading-with-hardware-controls)
+- [Implementing Capacitive Touch](#implementing-capacitive-touch)
+- [3D Printing the Custom Parts](#3d-printing-the-custom-parts)
+- [Features and Capabilities](#features-and-capabilities)
+- [Project Resources](#project-resources)
+- [Wrapping Up](#wrapping-up)
 
-## Usage ##
-
-Simply switch on SC1000 with a valid USB stick in, and after a few seconds it will start playing the first beat and sample on the USB stick. Plug in some headphones or a portable speaker, adjust the volume controls to your liking, and get skratchin!
-
-*Pressing* the **beat/sample down** button will select the next file in the current folder, and *holding* the button will skip to the next folder.
-
-Note that you shouldn't touch the jog wheel while you are turning the device on - this is because the SC1000 does a short calibration routine. Leave it a few seconds before touching it.
-
-
-## USB Folder layout ##
-
-The SC1000 expects the USB stick to have two folders on it - **beats** and **samples**. Note that the names of these folders *must* be in all-lowercase letters.
-
-The beats and samples folders should in turn contain a number of subfolders, to organise your files into albums. Each of these subfolders should contain a number of audio files, in **mp3** or **wav** format. For example, you might have a folder layout like : 
-
-* beats/Deluxe Shampoo Breaks/beat1.mp3
-* beats/Deluxe Shampoo Breaks/beat2.mp3
-* beats/Deluxe Shampoo Breaks/beat3.mp3
-* beats/Gag Seal Breaks/beat1.wav
-* beats/Gag Seal Breaks/beat2.wav
-* beats/Gag Seal Breaks/beat3.wav
-* samples/Super Seal Breaks/01 - Aaaah.wav
-* samples/Super Seal Breaks/02 - Fresh.wav
-* samples/Enter the Scratch Game vol 1/01 - Aaaah Fresh.wav
-* samples/Enter the Scratch Game vol 1/02 - Funkyfresh Aaaah.wav
-* samples/Enter the Scratch Game vol 1/03 - Funkydope Aaaah.wav
-
-Optionally, you can put an updated version of xwax on the root of the USB stick, and the SC1000 will run it instead of the internal version. This gives a very easy way to update the software on the device.
-
-![SC implementation chart](http://rasteri.com/SC1000_MIDI_chart.png)
+## The Spark of Inspiration
+![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/sc500_teal_transp_3.jpg)
 
 
-[![Demo Video](https://img.youtube.com/vi/ReuCnZciOf4/0.jpg)](https://www.youtube.com/watch?v=ReuCnZciOf4)
+It all started when I stumbled upon [this awesome video](https://youtu.be/Llxfi6l2I-U). Watching someone turn a simple setup into a functioning DJ turntable was mind-blowing. That got me thinking: could I build something similar using a Raspberry Pi? I grew up with a love for music and gadgets, so this seemed like the perfect project to combine both.
 
-The folders are as follows : 
-* **Firmware** - Source code for the input processor. This handles the pots, switches and capacitive touch sensor, and passes the information on to the main processor.
-* **OS** - SD card images and buildroot configs for the operating system that runs on the main processor.
-* **Software** - Source code for the modified version of xwax running on the main SoC.
-* **Hardware** - Schematics and gerbers for the main PCB and enclosure (which is made of PCBs)
+## Discovering the SC1000 and The_Rasteri's Work
 
+Digging deeper, I found out about the **SC1000**, a DIY turntable controller designed by **the_rasteri**. The designs were open-source, but getting my hands on the hardware was tricky. If you're interested in buying one, check out the [SC1000 MK2 here](https://portablismgear.com/sc1000/devices/sc1000mk2.html). It’s honestly a fantastic piece of gear if you can get your hands on it. However, I decided to take matters into my own hands and adapt the available resources to what I had lying around—enter the Raspberry Pi!
 
-## Tech Info ##
+![Workbench Setup](https://github.com/no3z/ScratchTJ/raw/main/docs/initial_build_setup.jpg)
 
-The device is based around the Olimex A13-SOM-256 system-on-module, which in turn uses an Allwinner A13 ARM Cortex A8 SoC. The sensing of the scratch wheel is handled by an Austria Microsystems AS5601 magnetic rotary sensor, and the other inputs are processed via a Microchip PIC18LF14K22 MCU. The whole unit is powered via USB, and optionally includes the ability to fit a power bank inside the enclosure.
+## Adapting Code for Raspberry Pi 2
 
-
-## Build guide : 
-
-### Assembly video ###
-
-A video covering most of this information can be found at https://www.youtube.com/watch?v=t1wy7IFSynY
+With hardware in hand, the next step was figuring out the software. The SC1000 was running some open-source code, but to make it work with a **Raspberry Pi 2** and an **AudioInjector audio hat**, I had to do some deep diving. The open-source code wasn't exactly plug-and-play for my setup. With lots of googling, trial and error, and a fair bit of coffee, I managed to adapt the original code to be compatible with my hardware. To be honest, some parts of the code are still kind of a mess, but it's functional, and that's what counts, right? Plus, I had a lot of help from AI like large language models to navigate the trickier bits.
 
 
-### Ingredients
+![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/soldering_station_setup.jpg)
 
-* **Main PCB and components** - Board files are in [hardware](./hardware) and can be ordered from somewhere like https://jlcpcb.com/
-* **Components** - Bill of Materials is in [hardware/](./hardware) and can be ordered from Mouser
-* **A13 System-on-Module** - Available from https://www.olimex.com/Products/SOM/A13/A13-SOM-256/, connects to the main PCB via 0.05" headers
-* **SD Card** - To hold the operating system. It only needs 200Mb so just get the smallest card you can find
-* **Enclosure parts** - The enclosure is made from PCBs and aluminium supports. Gerber files are in *./hardware/gerbers/Enclosure/*, aluminium supports are 20x10x156.8mm. The front and rear plates should be 1mm thick, the rest should be 1.6mm. I got mine from https://www.aluminiumwarehouse.co.uk/20-mm-x-10-mm-aluminium-flat-bar, they even cut it for me.
-* **Jogwheel parts** - The jogwheel itself is a gold-plated PCB, available in [hardware/gerbers/Jog Wheel](./hardware/gerbers/Jog%20Wheel). Mine is made from 0.6mm thick board, you can choose the thickness you prefer. You'll also need M8 bearing/hex bolt/nuts/washers, and a diametrically polarized magnet from https://www.kjmagnetics.com/proddetail.asp?prod=D42DIA-N52. The bearing I used is available at https://uk.rs-online.com/web/p/ball-bearings/6189957/
-* **Mini innoFADER** - the OEM model (for example found in the innoFADER Mini DUO pack) is fine, but a Mini innoFADER Plus has  better performance
+## Getting Xwax Up and Running
+
+Once the Pi was ready, it was time to install **Xwax**, an open-source digital vinyl emulation software. It’s kind of the heart of this whole setup, providing that realistic scratching capability. Getting Xwax to work on the Raspberry Pi was not straightforward. I had to compile it from source, tweak dependencies, and make sure it played nicely with the AudioInjector. After some head-scratching moments, I finally got it running, and boy, was that a satisfying moment.
+
+## Adding an LCD Menu System
+
+I didn’t want this project to require a keyboard or monitor every time I needed to tweak something. So, I added a **1602A LCD display**. The goal was to create an easy-to-use menu system that would let me adjust settings on the fly. I learned from the SC1000 Xwax adaptation and created a custom menu system for my setup. It was controlled by a small rotary encoder connected to the Pi. Now, I could change settings, switch between tracks, and do it all with just a knob—simple and effective.
+
+## Upgrading with Hardware Controls
+
+After the initial testing, I decided it needed more tactile, physical controls—something to make it feel more like DJ equipment. I ordered a big **optical rotary encoder** from AliExpress and a budget-friendly **DJ fader**. Of course, simply plugging these into the Pi wouldn’t do. I needed an **Arduino** to interface everything properly. The Arduino took on the task of reading these inputs and sending them to the Raspberry Pi. This made the fader and the encoder super responsive and fun to use.
+
+![Final Enclosure](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
+
+![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/main/docs/testing_assembly.jpg)
+## Implementing Capacitive Touch
+
+The turning point came when I realized I needed capacitive touch on the platter, just like a real DJ turntable. That’s when things got really DIY. I repurposed an old **hard drive platter** as my spinning disk—it already looked kind of like a vinyl record, so why not? I connected it to the encoder and added a simple capacitive touch sensor using a 1MΩ resistor. Now, whenever I touched the platter, it acted just like a vinyl turntable—pausing, slowing, and spinning the audio as I moved it.
+![Optical Encoder and HDD Platter](https://github.com/no3z/ScratchTJ/raw/main/docs/optical_encoder_and_platter.jpg)
+## 3D Printing the Custom Parts
+
+To bring everything together, I also had to dive into the world of **3D printing**. Here’s what I printed:
+
+- **Platter Adapter**: This was used to attach the HDD platter to the rotary encoder shaft. Initially, I just used a CD for testing before upgrading to the HDD platter.
+- **Enclosure**: I designed a simple case to house all the components and keep everything neat and tidy. Without it, the wires were going everywhere, and the setup was just a mess.
+
+You can find the models here:
+
+- HDD Adapter: [TinkerCAD Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter?sharecode=nWsXvmSv_DllBxx8CcdytpptvyzZCUKnqFkQ3bDZFho)
+- Enclosure: [TinkerCAD Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y)
+
+These parts made a huge difference in getting everything to look and feel more polished, rather than a spaghetti mess of wires.
+
+![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/resistor_array.jpg)
+## Features and Capabilities
+
+The ScratchTJ setup offers quite a few cool features:
+
+- **Live Scratching**: With the HDD platter and optical encoder, I can do real scratching. It's not perfect, but it's pretty damn fun.
+- **Recording Samples**: The system lets me record my scratch sessions on the fly, which is useful for saving cool sounds and coming back to them later.
+- **Adjustable Fader Settings**: I can tweak crossfader curves and responsiveness right from the menu.
+- **Platter Speed Control**: I can adjust playback speed, which adds a ton of versatility.
+- **LCD Menu Navigation**: With the rotary encoder, navigating through different settings feels quite intuitive.
+- **Capacitive Touch Detection**: Just like a real DJ setup, I can control the platter by simply touching it.
+
+These features really brought everything together, making it more than just a tech project, but an actual instrument you can jam with.
+
+## Project Resources
+
+- **GitHub Repository**: Check out the code and instructions on [GitHub](https://github.com/no3z/ScratchTJ/tree/main). A quick warning: the code isn’t the cleanest, and some parts are kind of messy because, well, this whole thing is a mishmash of a lot of trial and error (and a lot of help from large language models like ChatGPT).
+- **3D Models**:
+  - HDD Adapter: [Link](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter?sharecode=nWsXvmSv_DllBxx8CcdytpptvyzZCUKnqFkQ3bDZFho)
+  - Enclosure: [Link](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y)
+
+Feel free to explore the repository and models to build your own version, or maybe even improve upon it.
+
+## Wrapping Up
+
+This project has been a fantastic journey into combining hardware and software to create something fun and functional. From watching a YouTube video to building a DIY digital turntable, it's been all about learning and experimenting. 
+
+If you're interested in making your own ScratchTJ or have ideas to improve it, I'd love to hear from you. The project isn’t perfect, and there are still so many ways to make it better, but that’s the beauty of open-source projects: it’s all about iteration and collaboration.
+
+Kiitos paljon ja happy scratching!
+
+ 
 
 
-### Method ###
 
-* **Order** the Main and Enclosure PCBs, the components, the A13 SoM, and SD Card, and the Aluminium bar. I recommend using ENIG coating for the Jogwheel as you don't really want to be touching solder all day.
-
-* **Assemble the Main PCB.** I recommend assembling/testing the 3.3v power section first, so you don't blow all the other components. Don't connect the A13 module yet.
-
-* **Flash the input processor with its firmware** through connector J8. You will need a PIC programmer, such as the Microchip Pickit 3. The firmware hex file is [firmware/firmware.hex](./firmware/firmware.hex)
-
-* **Transfer the operating system to the SD card.** You will need an SD card interface, either USB or built-in to your PC. You can use dd on Linux/MacOS or Etcher on Windows to transfer the image. The image is [os/sdcard.img.gz](./os/sdcard.img.gz)
-
-* **Insert the SD card in the A13 module, and attach the SoM to the main PCB.** Make sure it's the correct way round - the SD card should be right beside the USB storage connector on the rear of the SC1000.
-
-* **Connect a USB power source, and power up the unit to test** - the A13 module's green light should blink a few times before remaining on.
-
-* **Assemble the jogwheel** - glue the bearing into the hole in the top plate of the enclosure. Now glue the magnet to the tip of the M8 bolt. Attach the jogwheel to the bearing using the bolt/nut/washer. Solder a wire to the outside of the bearing to act as a capacitive touch sensor.
-
-* **Connect** the fader to J1, capacitive touch sensor to J4, and (optionally) a small internal USB power bank to J3. If you don't use an internal power bank, put two jumpers horizontally across J3 to allow the power to bypass it.
-
-* **Test** - copy some beats and samples to a USB stick, and see if they play. Check below for how to structure the folders on the USB stick.
-
-* **Assemble the enclosure** - drill and tap M3 holes in the aluminium, and screw the whole enclosure together. Make sure the magnet at the end of the jogwheel bolt is suspended directly above the rotary sensor IC.
-
-
-
-
-
-## License ##
-
-Copyright (C) 2018 Andrew Tait <rasteri@gmail.com>
-
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License
-version 2, as published by the Free Software Foundation.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-General Public License version 2 for more details.
-
-You should have received a copy of the GNU General Public License
-version 2 along with this program; if not, write to the Free
-Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-MA 02110-1301, USA.
-
+---
