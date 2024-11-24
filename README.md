@@ -81,7 +81,8 @@ You can find the models here:
 
 These parts made a huge difference in getting everything to look and feel more polished, rather than a spaghetti mess of wires.
 
-![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/resistor_array.jpg)
+![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3892.jpg)
+![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3893.jpg)
 ## Features and Capabilities
 
 The ScratchTJ setup offers quite a few cool features:
