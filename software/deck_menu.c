@@ -27,7 +27,7 @@ static int selectedItem = 0;
 // Main deck menu items
 static MenuItem mainDeckMenuItems[] = {
     {"1. Load File", enter_load_file_menu},
-    {"2. Set Volume", enter_adjust_volume},
+    // {"2. Set Volume", enter_adjust_volume},
     {"3. Settings", enter_settings_menu},
     {"4. Info", enter_deck_info_display},
 };
@@ -57,12 +57,15 @@ static int settingsMenuSize = sizeof(settingsMenuItems) / sizeof(MenuItem);
 
 // Function Definitions
 
-// Display Deck Menu
+char title[32]; // Buffer for the title string
 void display_deck_menu(struct deck *d, int deck_no) {
     if (needsUpdate) {
         switch (currentDeckMenuState) {
             case DECK_MENU_MAIN:
-                display_menu(mainDeckMenuItems, mainDeckMenuSize, selectedItem, "Deck Menu");
+
+                snprintf(title, sizeof(title), "Deck %d Menu", deck_no+1); // Format the title with deck_no
+
+                display_menu(mainDeckMenuItems, mainDeckMenuSize, selectedItem, title);
                 break;
             case DECK_MENU_LOAD_FILE:
                 display_menu(loadFileMenuItems, loadFileMenuSize, selectedItem, "Load File");
@@ -187,25 +190,30 @@ void enter_deck_info_display(struct deck *d, int deckno) {
 void adjust_volume(struct deck *d, int deckno) {
     int movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
-    int new_volume = (d->player.volume*100);
+    double new_volume = d->player.setVolume*100;
+
     if (movement != 0) {
-        // Adjust volume with sensitivity and ensure it stays within [0.0, 1.0]
-         new_volume = new_volume + movement; // Adjust step size as needed
+        // Adjust volume with sensitivity and ensure it stays within [0, 100]
+        new_volume = new_volume + movement; // Adjust step size as needed
 
         if (new_volume < 0) new_volume = 0;
-        if (new_volume > 100) new_volume = 100;
+        if (new_volume > 127) new_volume = 127;
 
-        // Update the player's volume
+        d->player.setVolume = new_volume/100;
         player_set_volume(&d->player, new_volume);
 
+        // Call the trigger_io_event function with the updated volume
+        trigger_io_event(ACTION_VOLUME, deckno, (unsigned char)new_volume);
 
-    }
         // Update the display to reflect the new volume
         lcdClear(lcdHandle);
         lcdPosition(lcdHandle, 0, 0);
-        lcdPrintf(lcdHandle, "Volume: %d", new_volume);
-
+        lcdPrintf(lcdHandle, "Volume: %d", (int)new_volume);
+        lcdPosition(lcdHandle, 0, 1);
+        lcdPrintf(lcdHandle, "Movement: %d", movement);  
         needsUpdate = false; // Trigger the UI update
+    }
+
     // Handle button press
     if (button_press == 1 || button_press == 2) {
         // Return to the main menu on button press
@@ -268,7 +276,7 @@ void action_select_input_source(struct deck *d, int deckno) {
 
     // Generate the filename
     char filename[256];
-    snprintf(filename, sizeof(filename), "/home/no3z/samples/temp/rec%06d.raw", nextRecordingNumber++);
+    snprintf(filename, sizeof(filename), "/tmp/rec%06d.raw", nextRecordingNumber++);
     // Assuming nextRecordingNumber is a static variable or member variable
 
     // Start recording with the selected input source

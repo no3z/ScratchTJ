@@ -523,14 +523,18 @@ void read_serial_data() {
                 // Process complete line
                 line_buffer[line_index] = '\0';
                 line_index = 0;
+				float curveSwitch;
+				bool switchFader = false;
+				get_variable_value("Fad Switch", &curveSwitch);
+				if(curveSwitch > 0.5) { switchFader = true; }
 
                 // Parse the fader and encoder values
                 int fader_value, encoder_value, capacitive_value;
                 if (sscanf(line_buffer, "%d %d %d", &fader_value, &encoder_value, &capacitive_value) == 3) {
-                    ADCs[0] = 1023-fader_value;
-					ADCs[1] = fader_value;
-					ADCs[2] = 1023-fader_value;
-					ADCs[3] = fader_value;
+					ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
+					ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
+					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
+					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
 					capIsTouched = 0;
 					encoder_value = 4096 - encoder_value;
 
@@ -670,7 +674,7 @@ void process_rot()
 						float platterspeed;
 						get_variable_value("platterspeed", &platterspeed);
 						deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
-						printf("touch!\n");
+						// printf("touch!\n");
 						deck[1].player.target_position = deck[1].player.position;
 						deck[1].player.capTouch = 1;
 					}

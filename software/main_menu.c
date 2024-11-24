@@ -7,7 +7,7 @@
 
 extern bool needsUpdate;
 
-char *mainMenuOptions[] = {"Deck1 Menu", "Deck2 Menu", "Controller Menu", "Info Menu"};
+char *mainMenuOptions[] = {"Deck1 Menu", "Deck2 Menu", "Config Menu", "Info Menu"};
 static int selectedItem = 1;
 static int menuSize = 4;
 

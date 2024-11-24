@@ -163,7 +163,9 @@ void IOevent(struct mapping *map, unsigned char MidiBuffer[3])
 				deck[map->DeckNo].player.setVolume = (double)MidiBuffer[2] / 128.0;
 			} else {
 				deck[map->DeckNo].player.setVolume = (double)map->Param;
+				printf("Setvol: %d", map->Param);
 			}
+			
 		}
 		else if (map->Action == ACTION_PITCH)
 		{

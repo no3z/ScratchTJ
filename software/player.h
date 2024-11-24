@@ -92,7 +92,7 @@ void player_init(struct player *pl, unsigned int sample_rate,
 void player_clear(struct player *pl);
 void player_set_volume(struct player *pl, int volume);
 
-void player_set_timecoder(struct player *pl, struct timecoder *tc);
+void player_set_timecode(struct player *pl, struct timecoder *tc);
 void player_set_timecode_control(struct player *pl, bool on);
 bool player_toggle_timecode_control(struct player *pl);
 void player_set_internal_playback(struct player *pl);

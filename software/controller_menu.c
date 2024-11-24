@@ -32,7 +32,7 @@ void adjust_variable_value(EditableVariable *variable);
 void display_controller_menu(struct deck *d, int deck_no) {
     lcdClear(lcdHandle);
     lcdPosition(lcdHandle, 0, 0);
-    lcdPuts(lcdHandle, "Controller Menu");
+    lcdPuts(lcdHandle, "Config");
 
     // Display selected option
     lcdPosition(lcdHandle, 0, 1);
@@ -75,7 +75,7 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
         printf("No mixer controls found!\n");
         return;
     }
-
+    needsUpdate = true;
     bool adjusting = true;
     int selectedControl = 0;
 
@@ -91,6 +91,7 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
         if (button_press == 1) { // Adjust selected control
             adjust_mixer_control(selectedControl);
             needsUpdate = true;
+
         } else if (button_press == 2) { // Exit sound settings
             adjusting = false;
         }
@@ -100,16 +101,22 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
 
             lcdClear(lcdHandle);
             lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Sound Settings");
-            lcdPosition(lcdHandle, 0, 1);
+
 
             if (control->isVolume) {
-                lcdPrintf(lcdHandle, "%s [%ld/%ld]", control->name, control->current, control->max);
+                lcdPrintf(lcdHandle, "%s", control->name);
+                lcdPosition(lcdHandle, 0, 1);
+                lcdPrintf(lcdHandle, "[%ld/%ld]", control->current, control->max);
             } else if (control->isBoolean) {
-                lcdPrintf(lcdHandle, "%s [%s]", control->name, control->current ? "On" : "Off");
+                lcdPrintf(lcdHandle, "%s", control->name);
+                lcdPosition(lcdHandle, 0, 1);
+                lcdPrintf(lcdHandle, "[%s]",  control->current ? "On" : "Off");
             } else if (control->isEnum) {
-                lcdPrintf(lcdHandle, "%s [%s]", control->name, control->enumItems[control->currentEnumIndex]);
+                lcdPrintf(lcdHandle, "%s", control->name);
+                lcdPosition(lcdHandle, 0, 1);
+                lcdPrintf(lcdHandle, "[%s]", control->enumItems[control->currentEnumIndex]);
             } else {
+                lcdPosition(lcdHandle, 0, 1);
                 lcdPrintf(lcdHandle, "%s [Unknown]", control->name);
             }
 
@@ -122,7 +129,7 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
 void adjust_mixer_control(int selectedIndex) {
     MixerControl *control = &mixerControls[selectedIndex];
     bool adjusting = true;
-
+    needsUpdate = true;
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
@@ -161,11 +168,11 @@ void adjust_mixer_control(int selectedIndex) {
             lcdPosition(lcdHandle, 0, 1);
 
             if (control->isVolume) {
-                lcdPrintf(lcdHandle, "[%ld/%ld]", control->current, control->max);
+                lcdPrintf(lcdHandle, "%ld/%ld", control->current, control->max);
             } else if (control->isBoolean) {
-                lcdPrintf(lcdHandle, "[%s]", control->current ? "On" : "Off");
+                lcdPrintf(lcdHandle, "%s", control->current ? "On" : "Off");
             } else if (control->isEnum) {
-                lcdPrintf(lcdHandle, "[%s]", control->enumItems[control->currentEnumIndex]);
+                lcdPrintf(lcdHandle, "%s", control->enumItems[control->currentEnumIndex]);
             } else {
                 lcdPrintf(lcdHandle, "[Unknown]");
             }
@@ -185,7 +192,7 @@ void enter_global_settings_menu(struct deck *d, int deckno) {
         printf("No global settings available!\n");
         return;
     }
-
+    needsUpdate = true;
     bool adjusting = true;
     while (adjusting) {
         int movement = rotary_encoder_moved();
@@ -218,7 +225,7 @@ void enter_global_settings_menu(struct deck *d, int deckno) {
 void adjust_variable_value(EditableVariable *variable) {
     bool adjusting = true;
     float value = *variable->valuePtr;
-
+    needsUpdate = true;
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
