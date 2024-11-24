@@ -361,11 +361,11 @@ int main(int argc, char *argv[])
 
 	float input_curveFactor = 0.1f;
 	float input_curvePower = 0.2f;
-	float input_curveSwitch = 0.0f;
+	float input_curveSwitch = 1.0f;
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
 	float platterspeed = 3072.0f;
-	float target_pitch = 10.0f; //for a 1024 buffer size
+	float target_pitch = 15.0f; //10 for a 1024 buffer size
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
