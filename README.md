@@ -1,7 +1,13 @@
 
+
 # ScratchTJ: Tinkering a DIY Digital Turntable with Raspberry Pi 
 
-Hey there! Welcome to **ScratchTJ**, a project born out of curiosity and a passion for music and tinkering. This is all about turning a Raspberry Pi into a DIY digital turntable that lets you scratch like a pro DJ, using affordable and repurposed hardware. Let's dive into how this all came together.
+Hey there! Welcome to **ScratchTJ**, a project born out of curiosity and a passion for music and tinkering. This is all about turning a Raspberry Pi into a DIY digital turntable that lets you scratch like a pro DJ, using affordable and repurposed hardware. Let's dive into how this all came together. 
+
+First one demo video of the thing running: (Click to watch)
+
+[![Watch the video](https://img.youtube.com/vi/rufXcn8hjYE/maxresdefault.jpg)](https://youtu.be/rufXcn8hjYE)
+
 
 ## Table of Contents
 
@@ -51,6 +57,12 @@ After the initial testing, I decided it needed more tactile, physical controls�
 ![Final Enclosure](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
 
 ![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/main/docs/testing_assembly.jpg)
+
+
+[![Watch the video](https://img.youtube.com/vi/jpz3jol8UZQ/maxresdefault.jpg)](https://youtu.be/jpz3jol8UZQ)
+(Click to watch)
+
+
 ## Implementing Capacitive Touch
 
 The turning point came when I realized I needed capacitive touch on the platter, just like a real DJ turntable. That’s when things got really DIY. I repurposed an old **hard drive platter** as my spinning disk—it already looked kind of like a vinyl record, so why not? I connected it to the encoder and added a simple capacitive touch sensor using a 1MΩ resistor. Now, whenever I touched the platter, it acted just like a vinyl turntable—pausing, slowing, and spinning the audio as I moved it.
@@ -75,13 +87,16 @@ These parts made a huge difference in getting everything to look and feel more p
 The ScratchTJ setup offers quite a few cool features:
 
 - **Live Scratching**: With the HDD platter and optical encoder, I can do real scratching. It's not perfect, but it's pretty damn fun.
-- **Recording Samples**: The system lets me record my scratch sessions on the fly, which is useful for saving cool sounds and coming back to them later.
+- **Recording Samples**: The system lets record samples on the fly, via Mic or LineIn, which is useful for using cool sounds and scratching never before heard hooks.
 - **Adjustable Fader Settings**: I can tweak crossfader curves and responsiveness right from the menu.
 - **Platter Speed Control**: I can adjust playback speed, which adds a ton of versatility.
 - **LCD Menu Navigation**: With the rotary encoder, navigating through different settings feels quite intuitive.
 - **Capacitive Touch Detection**: Just like a real DJ setup, I can control the platter by simply touching it.
 
 These features really brought everything together, making it more than just a tech project, but an actual instrument you can jam with.
+
+[![Watch the video](https://img.youtube.com/vi/uF4GSIXVzZU/maxresdefault.jpg)](https://youtu.be/uF4GSIXVzZU)
+(Click to watch)
 
 ## Project Resources
 
@@ -99,9 +114,5 @@ This project has been a fantastic journey into combining hardware and software t
 If you're interested in making your own ScratchTJ or have ideas to improve it, I'd love to hear from you. The project isn’t perfect, and there are still so many ways to make it better, but that’s the beauty of open-source projects: it’s all about iteration and collaboration.
 
 Kiitos paljon ja happy scratching!
-
- 
-
-
 
 ---
