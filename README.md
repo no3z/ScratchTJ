@@ -36,9 +36,9 @@ With hardware in hand, the next step was figuring out the software. The SC1000 w
 
 ![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/soldering_station_setup.jpg)
 
-## Getting Xwax Up and Running
+## Getting SC1000 - Xwax Up and Running
 
-Once the Pi was ready, it was time to install **Xwax**, an open-source digital vinyl emulation software. It’s kind of the heart of this whole setup, providing that realistic scratching capability. Getting Xwax to work on the Raspberry Pi was not straightforward. I had to compile it from source, tweak dependencies, and make sure it played nicely with the AudioInjector. After some head-scratching moments, I finally got it running, and boy, was that a satisfying moment.
+Once the Pi was ready, it was time to tackle the software. The heart of this setup is Xwax, an open-source digital vinyl emulation software that provides realistic scratching capabilities. However, instead of starting from scratch, much of the work was based on the SC1000 GitHub repository, which is itself built upon Xwax. This repository offered a solid foundation tailored for DIY digital turntables. Adapting the SC1000 code to work with the Raspberry Pi and the AudioInjector wasn't straightforward. It required compiling from source, tweaking dependencies, and ensuring compatibility with the hardware. After some head-scratching moments, everything finally came together, marking a satisfying milestone in the project.
 
 ## Adding an LCD Menu System
 
