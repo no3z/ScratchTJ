@@ -1,0 +1,5 @@
+Rebutchered the butchered repository: 
+SC1000 Xwax - xwax butchered to work with the SC1000 digital scratch instrument
+
+
+Added LCD menus, and input interfaces via arduino nano sending data trought serial to rpi
