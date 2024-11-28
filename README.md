@@ -11,7 +11,7 @@ But first: one demo video of the thing running: (Click to watch)
 [![Watch the video](https://img.youtube.com/vi/rufXcn8hjYE/maxresdefault.jpg)](https://youtu.be/rufXcn8hjYE)
 
 ## The Spark of Inspiration
-![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/sc500_teal_transp_3.jpg)
+![Soldering Station](https://github.com/no3z/ScratchTJ/raw/master/docs/sc500_teal_transp_3.jpg)
 
 
 ## The Journey Begins
@@ -20,7 +20,7 @@ Discovering that the SC500 units were scarce and difficult to purchase, I turned
 ### Initial Hardware Tests
  The first step was to get the LCD screen operational and establish communication with the Raspberry Pi. I experimented with the 1602A LCD display, ensuring it could display text and respond to inputs. Concurrently, I began working with a rotary encoder to navigate menus and control parameters.
  
-![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/soldering_station_setup.jpg)
+![Soldering Station](https://github.com/no3z/ScratchTJ/raw/master/docs/soldering_station_setup.jpg)
 ### Integrating the Rotary Encoder
  With some assistance from GPT-powered coding suggestions, I developed C code to handle rotary encoder events. This allowed for start/stop control of the decks and adjustment of various parameters displayed on the LCD screen.
 
@@ -28,8 +28,8 @@ Discovering that the SC500 units were scarce and difficult to purchase, I turned
  ### Acquiring New Components
 To enhance the functionality, I sourced a magnetoelectric rotary encoder and a DJ fader from AliExpress. I also upgraded the LCD display to a 1602A with an integrated circuit (IC) to reduce the GPIO pin usage on the Raspberry Pi.
 
-![Final Enclosure](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
-![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/main/docs/testing_assembly.jpg)
+![Final Enclosure](https://github.com/no3z/ScratchTJ/raw/master/docs/enclosure_and_controls.jpg)
+![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/master/docs/testing_assembly.jpg)
 ### Introducing the Arduino Nano
  Realizing the need for additional processing capabilities to handle the fader and the rotary encoder, I incorporated an Arduino Nano into the setup. The Arduino reads the input from these components and communicates with the Raspberry Pi via serial connection (TX/RX).
 
@@ -37,8 +37,8 @@ To enhance the functionality, I sourced a magnetoelectric rotary encoder and a D
  To emulate the feel of a real turntable, I wanted to incorporate capacitive touch sensitivity. Initial attempts using electric paint on a CD proved inadequate. The solution was to use an open hard drive (HDD) platter connected to the magnetoelectric rotary encoder. The platter, connected to the Arduino Nano acting as a capacitive sensor, provided the desired touch sensitivity.
 
 
-![Workbench Setup](https://github.com/no3z/ScratchTJ/raw/main/docs/initial_build_setup.jpg)
-![Optical Encoder and HDD Platter](https://github.com/no3z/ScratchTJ/raw/main/docs/optical_encoder_and_platter.jpg)
+![Workbench Setup](https://github.com/no3z/ScratchTJ/raw/master/docs/initial_build_setup.jpg)
+![Optical Encoder and HDD Platter](https://github.com/no3z/ScratchTJ/raw/master/docs/optical_encoder_and_platter.jpg)
 
 ## Bill of Materials (BOM)
  - **Raspberry Pi 2** 
@@ -53,8 +53,8 @@ To enhance the functionality, I sourced a magnetoelectric rotary encoder and a D
 
 ## 3D Printing and Enclosure Design
 
-![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3892.jpg)
-![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3893.jpg)
+![Resistor Array](https://github.com/no3z/ScratchTJ/raw/master/docs/IMG_3892.jpg)
+![Resistor Array](https://github.com/no3z/ScratchTJ/raw/master/docs/IMG_3893.jpg)
 ### HDD Adapter and Enclosure
  To house the components and provide a user-friendly interface, I designed custom parts in Tinkercad: 
  - **HDD Adapter**: [Tinkercad Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter)  The HDD adapter features channels for a 1.5mm wire to connect the platter to the shaft, enabling touch sensitivity.
