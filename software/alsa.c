@@ -131,6 +131,11 @@ static int pcm_open(struct alsa_pcm *alsa, const char *device_name,
                 buffer_time);
         return -1;
     }*/
+    r = snd_pcm_hw_params_set_period_size(alsa->pcm, hw_params, buffer_size/4, 0);
+    if (!chk("hw_params_set_period_size", r)) {
+        fprintf(stderr, "Error setting period size.\n");
+        return -1;
+    }
 
     if (snd_pcm_hw_params_set_buffer_size(alsa->pcm, hw_params, buffer_size) < 0)
     {

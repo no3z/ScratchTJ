@@ -1,7 +1,7 @@
 #ifndef SC_QUEUE_H
 #define SC_QUEUE_H
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 256
 
 typedef struct inputstate {
     double timestamp;
