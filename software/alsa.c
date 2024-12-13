@@ -63,6 +63,8 @@ static void alsa_error(const char *msg, int r)
 
 static bool chk(const char *s, int r)
 {
+        printf("%s %d\n", s,r);
+
     if (r < 0)
     {
         alsa_error(s, r);
@@ -131,11 +133,7 @@ static int pcm_open(struct alsa_pcm *alsa, const char *device_name,
                 buffer_time);
         return -1;
     }*/
-    r = snd_pcm_hw_params_set_period_size(alsa->pcm, hw_params, buffer_size/4, 0);
-    if (!chk("hw_params_set_period_size", r)) {
-        fprintf(stderr, "Error setting period size.\n");
-        return -1;
-    }
+
 
     if (snd_pcm_hw_params_set_buffer_size(alsa->pcm, hw_params, buffer_size) < 0)
     {
@@ -143,12 +141,11 @@ static int pcm_open(struct alsa_pcm *alsa, const char *device_name,
         return (-1);
     }
 
-    p = 2; /* double buffering */
-    dir = 1;
-    r = snd_pcm_hw_params_set_periods_min(alsa->pcm, hw_params, &p, &dir);
-    if (!chk("hw_params_set_periods_min", r))
-    {
-        fprintf(stderr, "Buffer may be too small for this hardware.\n");
+
+
+    r = snd_pcm_hw_params_set_period_size(alsa->pcm, hw_params, buffer_size/2, 0);
+    if (!chk("hw_params_set_period_size", r)) {
+        fprintf(stderr, "Error setting period size.\n");
         return -1;
     }
 
@@ -156,9 +153,20 @@ static int pcm_open(struct alsa_pcm *alsa, const char *device_name,
     if (!chk("hw_params", r))
         return -1;
 
+    // p = 2; /* double buffering */
+    // dir = 1;
+    // r = snd_pcm_hw_params_set_periods_min(alsa->pcm, hw_params, &p, &dir);
+    // if (!chk("hw_params_set_periods_min", r))
+    // {
+    //     fprintf(stderr, "Buffer may be too small for this hardware.\n");
+    //     return -1;
+    // }
+
+
     r = snd_pcm_hw_params_get_period_size(hw_params, &alsa->period, &dir);
     if (!chk("get_period_size", r))
         return -1;
+    
     snd_pcm_uframes_t fun;
     r = snd_pcm_hw_params_get_buffer_size(hw_params, &fun);
 

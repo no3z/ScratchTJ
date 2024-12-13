@@ -532,7 +532,11 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-	filtered_pitch = (0.1 * target_pitch) + (0.9 * pl->pitch);
+		float pitch_mixer;
+
+		get_variable_value("pitch_mixer", &pitch_mixer);
+
+	filtered_pitch = (pitch_mixer * target_pitch) + ((1.0-pitch_mixer) * pl->pitch);
 
 	amountToDecay = (DECAYSAMPLES) / (double)samples;
 

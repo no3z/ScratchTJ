@@ -594,7 +594,7 @@ void process_rot()
 	// Handle rotary sensor
 
 	if (scsettings.jogReverse) {
-		//printf("%d,",deck[1].newEncoderAngle);
+		//
 		deck[1].newEncoderAngle = 4095 - deck[1].newEncoderAngle;
 		//printf("%d\n",deck[1].newEncoderAngle);
 	}

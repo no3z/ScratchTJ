@@ -99,7 +99,7 @@ void loadSettings()
 	scsettings.platterenabled = 1;
 	scsettings.platterspeed = 2275;
 	scsettings.samplerate = 48000;
-	scsettings.updaterate = 2000;
+	scsettings.updaterate = 1000;
 	scsettings.debouncetime = 5;
 	scsettings.holdtime = 100;
 	scsettings.slippiness = 200;
@@ -312,8 +312,8 @@ int main(int argc, char *argv[])
 
 	rate = 48000;
 
-	alsa_init(&deck[0].device, "plughw:1,0", rate, scsettings.buffersize, 0);
-	alsa_init(&deck[1].device, "plughw:1,0", rate, scsettings.buffersize, 1);
+	alsa_init(&deck[0].device, "hw:1,0", rate, scsettings.buffersize, 0);
+	alsa_init(&deck[1].device, "hw:1,0", rate, scsettings.buffersize, 1);
 
 	deck_init(&deck[0], &rt, importer, 1.0, false, false, 0);
 	deck_init(&deck[1], &rt, importer, 1.0, false, false, 1);
@@ -364,15 +364,18 @@ int main(int argc, char *argv[])
 	float input_curveSwitch = 1.0f;
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
-	float platterspeed = 3072.0f;
-	float target_pitch = 15.0f; //10 for a 1024 buffer size
+	float platterspeed = 2304.0f;
+	float target_pitch = 10.0f; //10 for a 1024 buffer size
+	float pitch_mixer = 0.1f; 
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
 	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
-    register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
+    register_variable("pitch_mixer", &pitch_mixer, 0.f, .20f, 0.005f);
+	register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
 	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
+	
 	
 
 	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));
