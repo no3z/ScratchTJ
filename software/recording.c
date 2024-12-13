@@ -167,7 +167,7 @@ int start_recording(RecordingContext *context, const char *input_device, const c
         return -1;
     }
 
-    unsigned int sample_rate = 48000;
+    unsigned int sample_rate = 44100;
     if ((err = snd_pcm_hw_params_set_rate(context->capture_handle, hw_params,
                                           sample_rate, 0)) < 0)
     {
