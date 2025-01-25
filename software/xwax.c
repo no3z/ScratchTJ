@@ -362,20 +362,23 @@ int main(int argc, char *argv[])
 	float input_curveFactor = 0.1f;
 	float input_curvePower = 0.2f;
 	float input_curveSwitch = 1.0f;
-	float slippiness = 200.f;
+	float slippiness = 250.f;
 	float brakespeed = 3000.f;
-	float platterspeed = 2304.0f;
+	float platterspeed = 2275.0f;
 	float target_pitch = 10.0f; //10 for a 1024 buffer size
 	float pitch_mixer = 0.1f; 
+	float update_rate = 0.0f; 
+
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
-	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
+	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 1.0f);
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
     register_variable("pitch_mixer", &pitch_mixer, 0.f, .20f, 0.005f);
 	register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
 	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
-	
+	register_variable("update_rate", &update_rate, 0.f, 600.0f, 1.f);
+
 	
 
 	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));

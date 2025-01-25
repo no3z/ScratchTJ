@@ -624,11 +624,13 @@ void process_rot()
 
 	// rotary sensor sometimes returns incorrect values, if we skip more than 100 ignore that value
 	// If we see 3 blips in a row, then I guess we better accept the new value
-	if (abs(deck[1].newEncoderAngle - wrappedAngle) > 100 && numBlips < 2)
-	{
-		numBlips++;
-	}
-	else
+
+	// if (abs(deck[1].newEncoderAngle - wrappedAngle) > 100 && numBlips < 1)
+	// {
+	// 	// printf("blip! %d %d %d %d\n", deck[1].newEncoderAngle-deck[1].encoderAngle, deck[1].newEncoderAngle, wrappedAngle, numBlips);
+	// 	numBlips++;
+	// }
+	// else
 	{
 		numBlips = 0;
 		deck[1].encoderAngle = deck[1].newEncoderAngle;
@@ -657,7 +659,10 @@ void process_rot()
 			}
 
 			// Use the angle of the platter to control sample pitch
+
 			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / 16384) + 1.0;
+			printf("pitch! %d %d %d\n", deck[(pitchMode - 1)].player.note_pitch, deck[1].encoderAngle, deck[1].angleOffset);
+
 		}
 		else
 		{
@@ -671,6 +676,7 @@ void process_rot()
 					// Positive touching edge
 					if (!deck[1].player.capTouch || oldPitchMode && !deck[1].player.stopped)
 					{
+
 						float platterspeed;
 						get_variable_value("platterspeed", &platterspeed);
 						deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
@@ -706,7 +712,6 @@ void process_rot()
 				float platterspeed;
 			get_variable_value("platterspeed", &platterspeed);
 			deck[1].player.target_position = (double)(deck[1].encoderAngle + deck[1].angleOffset) / platterspeed;
-			// printf("blip! %d %d %d\n", deck[1].newEncoderAngle, deck[1].encoderAngle, deck[1].player.target_position);
 
 			// Loop when track gets to end
 
@@ -856,8 +861,9 @@ process_pic();
 
 			lastinputtime = inputtime;
 		}
-
-		usleep(scsettings.updaterate);
+		float update_rate;
+		get_variable_value("update_rate", &update_rate);
+		usleep((int)update_rate);
 	}
 }
 
