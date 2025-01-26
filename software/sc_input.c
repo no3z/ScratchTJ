@@ -861,9 +861,7 @@ process_pic();
 
 			lastinputtime = inputtime;
 		}
-		float update_rate;
-		get_variable_value("update_rate", &update_rate);
-		usleep((int)update_rate);
+
 	}
 }
 

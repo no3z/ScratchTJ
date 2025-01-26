@@ -464,27 +464,27 @@ bool NearlyEqual(double val1, double val2, double tolerance)
 	else
 		return false;
 }
-
 void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 {
+	static int skip_counter = 0;  // <--- The new static counter
+
 	double r, pitch=0.0, target_volume, amountToDecay, target_pitch, filtered_pitch;
 	double diff;
 
 	pl->samplesSoFar += samples;
-
-	//pl->target_position = (sin(((double) pl->samplesSoFar) / 20000) + 1); // Sine wave to simulate scratching, used for debugging
 
 	// figure out motor speed
 	if (pl->stopped)
 	{
 		// Simulate braking
 		if (pl->motor_speed > 0.1)
-		{	float brakespeed;
+		{
+			float brakespeed;
    			get_variable_value("brakespeed", &brakespeed);
 			pl->motor_speed = pl->motor_speed - (double)samples / (brakespeed * 10);
 		}
 		else
-		{	
+		{
 			pl->motor_speed = 0.0;
 		}
 	}
@@ -494,19 +494,16 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		pl->motor_speed = pl->note_pitch * pl->fader_pitch * pl->bend_pitch;
 	}
 
-	// deal with case where we've released the platter
-	if ( pl->justPlay == 1 || // platter is always released on beat deck
-		(
-			pl->capTouch == 0 && pl->oldCapTouch == 0 // don't do it on the first iteration so we pick up backspins
-		) 
-	)
+	// If platter is "released" or this deck is "justPlay"
+	if ( pl->justPlay == 1 ||
+		 ( pl->capTouch == 0 && pl->oldCapTouch == 0 ) )
 	{
-		if (pl->pitch > 20.0) pl->pitch = 20.0;
+		if (pl->pitch > 20.0)  pl->pitch = 20.0;
 		if (pl->pitch < -20.0) pl->pitch = -20.0;
 
 		float slippiness;
 		get_variable_value("slippiness", &slippiness);
-		// Simulate slipmat for lasers/phasers
+		// Simulate slipmat
 		if (pl->pitch < pl->motor_speed - 0.1)
 			target_pitch = pl->pitch + (double)samples / slippiness;
 		else if (pl->pitch > pl->motor_speed + 0.1)
@@ -516,31 +513,49 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	else
 	{
-		diff = pl->position - pl->target_position;
-		float target_pitch_multiplier;
+		// --- Rate-limiting logic below ---
+		skip_counter++;
+		float skipEvery;
+		get_variable_value("skip_pitch", &skipEvery);
+		if (skip_counter < skipEvery)
+		{
+			// Just keep using the old pitch, do not recalc
+			// so we don't keep adjusting pitch each call
+			target_pitch = pl->pitch;
+		}
+		else
+		{
+			// Reset counter and do the normal "scratch" logic
+			skip_counter = 0;
 
-		// Original Buffer Size (B_{\text{original}}): 256
-		// New Buffer Size (B_{\text{new}}): 1024
-// Scaling Factor:
+			// 1) find diff
+			diff = pl->position - pl->target_position;
 
-// Scaling Factor=𝐵original/𝐵new=256/1024=0.25
-// Scaling Factor=40×0.25=10
+			float target_pitch_multiplier;
+			get_variable_value("target_pitch", &target_pitch_multiplier);
 
-		get_variable_value("target_pitch", &target_pitch_multiplier);
+			target_pitch = (-diff) * target_pitch_multiplier;
 
-		target_pitch = (-diff) * target_pitch_multiplier;
+			// clamp
+			float clamp_pitch;
+			get_variable_value("clamp_pitch", &clamp_pitch);
+			if (target_pitch > clamp_pitch)   target_pitch = clamp_pitch;
+			if (target_pitch < -clamp_pitch)  target_pitch = -clamp_pitch;
+
+			// Debug
+			// printf("diff=%.4f, old_pitch=%.4f, target_pitch=%.4f\n",
+			//        diff, pl->pitch, target_pitch);
+		}
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-		float pitch_mixer;
+	float pitch_mixer;
+	get_variable_value("pitch_mixer", &pitch_mixer);
 
-		get_variable_value("pitch_mixer", &pitch_mixer);
-
-	filtered_pitch = (pitch_mixer * target_pitch) + ((1.0-pitch_mixer) * pl->pitch);
+	filtered_pitch = (pitch_mixer * target_pitch) + ((1.0 - pitch_mixer) * pl->pitch);
 
 	amountToDecay = (DECAYSAMPLES) / (double)samples;
-
-	if (NearlyEqual(pl->faderTarget, pl->faderVolume, amountToDecay)) // Make sure to set directly when we're nearly there to avoid oscilation
+	if (NearlyEqual(pl->faderTarget, pl->faderVolume, amountToDecay))
 		pl->faderVolume = pl->faderTarget;
 	else if (pl->faderTarget > pl->faderVolume)
 		pl->faderVolume += amountToDecay;
@@ -548,15 +563,12 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		pl->faderVolume -= amountToDecay;
 
 	target_volume = fabs(pl->pitch) * VOLUME * pl->faderVolume;
-
 	if (target_volume > 1.0)
 		target_volume = 1.0;
 
 	/* Sync pitch is applied post-filtering */
 
-	/* We must return audio immediately to stay realtime. A spin
-	 * lock protects us from changes to the audio source */
-
+	// Build audio now
 	if (!spin_try_lock(&pl->lock))
 	{
 		r = build_silence(pcm, samples, pl->sample_dt, pitch);
@@ -564,12 +576,12 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	else
 	{
 		r = build_pcm(pcm, samples, pl->sample_dt, pl->track,
-					  pl->position - pl->offset, pl->pitch, filtered_pitch, pl->volume, target_volume);
+		              pl->position - pl->offset, pl->pitch, filtered_pitch,
+		              pl->volume, target_volume);
 		pl->pitch = filtered_pitch;
 		spin_unlock(&pl->lock);
 	}
 
 	pl->position += r;
-
 	pl->volume = target_volume;
 }

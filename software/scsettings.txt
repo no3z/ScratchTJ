@@ -14,7 +14,7 @@
 # faderopenpoint should always be 
 # more than faderclosepoint
 
-buffersize=256
+buffersize=128
 
 # Value required to open the fader when it's closed
 faderopenpoint=5
