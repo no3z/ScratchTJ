@@ -365,7 +365,7 @@ int main(int argc, char *argv[])
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
 	float platterspeed = 2275.0f;
-	float target_pitch = 40.0f; //10 for a 1024 buffer size
+	float target_pitch = 16.0f; //10 for a 1024 buffer size
 	float pitch_mixer = 0.1f; 
 	float clamp_pitch = 10.0; 
 	float skip_pitch = 4.f; 
