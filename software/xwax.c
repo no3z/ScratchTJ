@@ -93,7 +93,7 @@ void loadSettings()
 	unsigned char midicommand[3];
 	char *linetok, *valuetok;
 	// set defaults
-	scsettings.buffersize = 256;
+	scsettings.buffersize = 128;
 	scsettings.faderclosepoint = 2;
 	scsettings.faderopenpoint = 10;
 	scsettings.platterenabled = 1;
@@ -362,18 +362,18 @@ int main(int argc, char *argv[])
 	float input_curveFactor = 0.1f;
 	float input_curvePower = 0.2f;
 	float input_curveSwitch = 1.0f;
-	float slippiness = 150.f;
+	float slippiness = 200.f;
 	float brakespeed = 3000.f;
 	float platterspeed = 2275.0f;
 	float target_pitch = 40.0f; //10 for a 1024 buffer size
 	float pitch_mixer = 0.1f; 
-	float clamp_pitch = 2.189f; 
-	float skip_pitch = 7.f; 
+	float clamp_pitch = 10.0; 
+	float skip_pitch = 4.f; 
 
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
-	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 1.0f);
+	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 10.0f);
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
     register_variable("pitch_mixer", &pitch_mixer, 0.f, .20f, 0.005f);
 	register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);

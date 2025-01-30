@@ -276,7 +276,7 @@ void action_select_input_source(struct deck *d, int deckno) {
 
     // Generate the filename
     char filename[256];
-    snprintf(filename, sizeof(filename), "/tmp/rec%06d.raw", nextRecordingNumber++);
+    snprintf(filename, sizeof(filename), "/tmp/rec%06d.wav", nextRecordingNumber++);
     // Assuming nextRecordingNumber is a static variable or member variable
 
     // Start recording with the selected input source

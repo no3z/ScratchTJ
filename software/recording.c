@@ -5,9 +5,86 @@
 #include <string.h>
 #include <pthread.h>
 #include <alsa/asoundlib.h>
-
+#include <stdint.h>              // WAV HEADER ADDED
 #include "recording.h"
 #include "xwax.h"
+
+#define WAV_HEADER_SIZE 44       // WAV HEADER ADDED
+
+/* WAV HEADER ADDED - Write a placeholder WAV header at the beginning */
+static void write_wav_header(FILE *file, unsigned int sample_rate, int channels, int bits_per_sample)
+{
+    // The "RIFF" chunk descriptor
+    fwrite("RIFF", 1, 4, file);
+
+    // Placeholder for file size (will update later in update_wav_header)
+    uint32_t chunk_size = 0;  // 4 bytes
+    fwrite(&chunk_size, 4, 1, file);
+
+    // Format
+    fwrite("WAVE", 1, 4, file);
+
+    // "fmt " sub-chunk
+    fwrite("fmt ", 1, 4, file);
+    uint32_t subchunk1_size = 16;
+    fwrite(&subchunk1_size, 4, 1, file);
+
+    uint16_t audio_format = 1; // PCM
+    fwrite(&audio_format, 2, 1, file);
+
+    uint16_t num_channels = (uint16_t) channels;
+    fwrite(&num_channels, 2, 1, file);
+
+    uint32_t sampleRate = sample_rate;
+    fwrite(&sampleRate, 4, 1, file);
+
+    uint32_t byte_rate = sample_rate * channels * (bits_per_sample / 8);
+    fwrite(&byte_rate, 4, 1, file);
+
+    uint16_t block_align = channels * (bits_per_sample / 8);
+    fwrite(&block_align, 2, 1, file);
+
+    uint16_t bps = bits_per_sample;
+    fwrite(&bps, 2, 1, file);
+
+    // "data" sub-chunk
+    fwrite("data", 1, 4, file);
+
+    // Placeholder for subchunk2_size (will update later)
+    uint32_t subchunk2_size = 0;
+    fwrite(&subchunk2_size, 4, 1, file);
+}
+
+/* WAV HEADER ADDED - Update the WAV header with the correct file sizes */
+static void update_wav_header(const char *filename)
+{
+    FILE *file = fopen(filename, "r+b");
+    if (!file) {
+        perror("Failed to open file for WAV header update");
+        return;
+    }
+
+    // File size = total bytes - 8 (RIFF chunk descriptor)
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    if (file_size < WAV_HEADER_SIZE) {
+        // File too small or error
+        fclose(file);
+        return;
+    }
+
+    // Chunk size (at offset 4)
+    uint32_t chunk_size = (uint32_t)(file_size - 8);
+    fseek(file, 4, SEEK_SET);
+    fwrite(&chunk_size, 4, 1, file);
+
+    // Subchunk2 size (at offset 40)
+    uint32_t subchunk2_size = (uint32_t)(file_size - WAV_HEADER_SIZE);
+    fseek(file, 40, SEEK_SET);
+    fwrite(&subchunk2_size, 4, 1, file);
+
+    fclose(file);
+}
 
 /* Function to fetch available input sources from ALSA */
 int get_available_input_sources(InputSource *sources, int max_sources)
@@ -190,6 +267,7 @@ int start_recording(RecordingContext *context, const char *input_device, const c
         snd_pcm_close(context->capture_handle);
         return -1;
     }
+
     strncpy(context->filename, filename, sizeof(context->filename) - 1);
     context->filename[sizeof(context->filename) - 1] = '\0';
 
@@ -201,6 +279,9 @@ int start_recording(RecordingContext *context, const char *input_device, const c
         snd_pcm_close(context->capture_handle);
         return -1;
     }
+
+    // WAV HEADER ADDED: Write a placeholder WAV header before capturing PCM
+    write_wav_header(context->output_file, sample_rate, 2, 16);
 
     // Set running flag.
     context->running = 1;
@@ -239,6 +320,10 @@ void stop_recording(struct deck *d, RecordingContext *context)
         fclose(context->output_file);
         context->output_file = NULL;
     }
+
+    // WAV HEADER ADDED: Update the file now that recording is done
+    update_wav_header(context->filename);
+
     struct player *pl = &d->player;
 
     char *allocated_filename = strdup(context->filename);  // Duplicate the filename
@@ -248,6 +333,7 @@ void stop_recording(struct deck *d, RecordingContext *context)
     }
 
     printf("Recording saved to: %s\n", allocated_filename);
+
     struct track *new_track;
     // Acquire a new track
     new_track = track_acquire_by_import(d->importer, allocated_filename);
