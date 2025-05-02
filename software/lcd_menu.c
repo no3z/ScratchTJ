@@ -24,6 +24,13 @@
 #define ENABLE 0x04
 #define LCD_LINE_1 0x80  // First line
 #define LCD_LINE_2 0xC0  // Second line
+
+
+#define BUTTON_SHORT 17  // GPIO pin for short press button
+#define BUTTON_LONG 27   // GPIO pin for long press button
+#define BUTTON_DEBOUNCE_DELAY 250  // Debounce time in milliseconds
+
+
 // Globals for I2C LCD and Rotary Encoder
 int lcdHandle;  // I2C LCD Handle
 static struct deck **decks;
@@ -162,6 +169,12 @@ void lcd_menu_init(struct deck *deck_array[], int count) {
     pinMode(ROTARY_DT, INPUT);
     pinMode(ROTARY_SW, INPUT);
     pullUpDnControl(ROTARY_SW, PUD_UP);
+
+    pinMode(BUTTON_SHORT, INPUT);
+    pinMode(BUTTON_LONG, INPUT);
+    pullUpDnControl(BUTTON_SHORT, PUD_UP);  // Enable pull-up resistors
+    pullUpDnControl(BUTTON_LONG, PUD_UP);   
+
     lcd_init();
     printf("LCD menu initialized.\n");
 
@@ -205,12 +218,21 @@ int rotary_encoder_moved() {
     return 0;  // No movement
 }
 
+
 // Detects rotary button press: 1 for short press, 2 for long press, 0 for no press
 int rotary_button_pressed() {
-    bool buttonState = digitalRead(ROTARY_SW) == LOW;
+    bool rotaryButtonState = digitalRead(ROTARY_SW) == LOW;
+    bool shortButtonState = digitalRead(BUTTON_SHORT) == LOW;
+    bool longButtonState = digitalRead(BUTTON_LONG) == LOW;
     unsigned long currentPressTime = millis();
+    
+    static unsigned long lastShortButtonTime = 0;
+    static unsigned long lastLongButtonTime = 0;
+    static bool shortButtonPressed = false;
+    static bool longButtonPressed = false;
 
-    if (buttonState) {
+    // Check the rotary encoder button first (original functionality)
+    if (rotaryButtonState) {
         if (lastButtonPressTime == 0) lastButtonPressTime = currentPressTime;
 
         if (currentPressTime - lastButtonPressTime >= LONG_PRESS_DELAY && !longPressHandled) {
@@ -226,7 +248,28 @@ int rotary_button_pressed() {
         lastButtonPressTime = 0;
         longPressHandled = false;
     }
-    return 0;
+    
+    // Check the dedicated short press button with debouncing
+    if (shortButtonState && !shortButtonPressed && 
+        (currentPressTime - lastShortButtonTime > BUTTON_DEBOUNCE_DELAY)) {
+        shortButtonPressed = true;
+        lastShortButtonTime = currentPressTime;
+        return 1;  // Emulate a short press
+    } else if (!shortButtonState) {
+        shortButtonPressed = false;
+    }
+    
+    // Check the dedicated long press button with debouncing
+    if (longButtonState && !longButtonPressed && 
+        (currentPressTime - lastLongButtonTime > BUTTON_DEBOUNCE_DELAY)) {
+        longButtonPressed = true;
+        lastLongButtonTime = currentPressTime;
+        return 2;  // Emulate a long press
+    } else if (!longButtonState) {
+        longButtonPressed = false;
+    }
+    
+    return 0;  // No button press detected
 }
 void trigger_io_event(unsigned char action, unsigned char deckNo, unsigned char param) {
     struct mapping temp_map = {0}; // Temporary mapping structure
