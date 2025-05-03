@@ -26,7 +26,7 @@ typedef enum {
 extern int lcdHandle;  // Accessible across all menu files
 extern bool needsUpdate;
 extern MainMenuState mainMenuState;
-
+extern bool jogPitchLongPressActive;
 
 // Menu Control Functions
 void lcd_menu_init(struct deck *decks[], int deck_count);

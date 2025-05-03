@@ -16,7 +16,12 @@ extern MainMenuState mainMenuState;
 void display_main_menu(struct deck *decks[], int deck_count) {
     lcdClear(lcdHandle);
     lcdPosition(lcdHandle, 0, 0);
-
+    if (jogPitchLongPressActive) {        
+        lcdPuts(lcdHandle, "Pitch Mode");     // Short indicator for Jog Pitch
+        lcdPosition(lcdHandle, 0, 1);
+        lcdPrintf(lcdHandle, "%d", decks[1]->player.note_pitch);
+        return;
+    }
     if (mainMenuState == MENU_MAIN) {
         lcdPuts(lcdHandle, "Main Menu");
         lcdPosition(lcdHandle, 0, 1);
@@ -43,11 +48,14 @@ void display_main_menu(struct deck *decks[], int deck_count) {
 
 void handle_main_menu_navigation(struct deck *decks[], int deck_count) {
 
+    if (jogPitchLongPressActive) {
+        return;
+    }
 
     if (mainMenuState == MENU_MAIN) {
-        int encoder_movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
-        
+        int encoder_movement = rotary_encoder_moved();
+
         if (encoder_movement != 0) {
             selectedItem = (selectedItem + encoder_movement + menuSize) % menuSize;
             needsUpdate = true;

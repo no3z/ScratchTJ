@@ -661,7 +661,7 @@ void process_rot()
 			// Use the angle of the platter to control sample pitch
 
 			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / 16384) + 1.0;
-			printf("pitch! %d %d %d\n", deck[(pitchMode - 1)].player.note_pitch, deck[1].encoderAngle, deck[1].angleOffset);
+			//printf("pitch! %d %d %d\n", deck[(pitchMode - 1)].player.note_pitch, deck[1].encoderAngle, deck[1].angleOffset);
 
 		}
 		else

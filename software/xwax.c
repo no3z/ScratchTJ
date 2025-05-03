@@ -364,10 +364,10 @@ int main(int argc, char *argv[])
 	float input_curveSwitch = 1.0f;
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
-	float platterspeed = 2275.0f;
+	float platterspeed = 3072.0f;
 	float target_pitch = 16.0f; //10 for a 1024 buffer size
-	float pitch_mixer = 0.1f; 
-	float clamp_pitch = 10.0; 
+	float pitch_mixer = 0.115f; 
+	float clamp_pitch = 12.5; 
 	float skip_pitch = 4.f; 
 
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
@@ -378,7 +378,7 @@ int main(int argc, char *argv[])
     register_variable("pitch_mixer", &pitch_mixer, 0.f, .20f, 0.005f);
 	register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
 	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
-	register_variable("clamp_pitch", &clamp_pitch, 0.f, 256.0f, 0.05f);
+	register_variable("clamp_pitch", &clamp_pitch, 0.f, 256.0f, 0.5f);
 	register_variable("skip_pitch", &skip_pitch, 0.f, 256.0f, 1.0f);
 	
 

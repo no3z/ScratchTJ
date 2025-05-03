@@ -30,7 +30,7 @@
 #define BUTTON_LONG 27   // GPIO pin for long press button
 #define BUTTON_DEBOUNCE_DELAY 250  // Debounce time in milliseconds
 
-
+bool jogPitchLongPressActive = false;
 // Globals for I2C LCD and Rotary Encoder
 int lcdHandle;  // I2C LCD Handle
 static struct deck **decks;
@@ -184,16 +184,48 @@ void lcd_menu_init(struct deck *deck_array[], int count) {
     display_main_menu(decks, deck_count);
 }
 
-
-// Poll encoder and update display if needed
+bool isInPitchMode = false;
 void poll_rotary_encoder() {
+    static bool wasInPitchMode = false;
+    if(isInPitchMode){
+        rotary_button_pressed();
+    }
+    // Check for state changes
+    if (jogPitchLongPressActive && !isInPitchMode) {  // Entering pitch mode
+        for (int i = 0; i < deck_count; i++) {
+            trigger_io_event_no_param(ACTION_JOGPIT, i);
+        }
+        needsUpdate = true;
+        isInPitchMode = true;
+        printf("Global Jog Pitch Mode enabled (long press)\n");
+        wasInPitchMode = true;
+
+    } 
+    else if (!jogPitchLongPressActive && isInPitchMode) {  // Exiting pitch mode
+        // Disable jogPitch mode on all decks
+        for (int i = 0; i < deck_count; i++) {
+            trigger_io_event_no_param(ACTION_JOGPSTOP, i);
+        }
+        needsUpdate = true;
+        isInPitchMode = false;
+        printf("Global Jog Pitch Mode disabled (button released)\n");
+        wasInPitchMode = false;
+    }
+    
+    // Debug output
+    if (isInPitchMode != wasInPitchMode) {
+        printf("Pitch mode state change: was %d, now %d\n", wasInPitchMode, isInPitchMode);
+        wasInPitchMode = isInPitchMode;
+    }
+    
+    // Continue with normal menu handling
     handle_main_menu_navigation(decks, deck_count);
+    
     if (needsUpdate) {
         display_main_menu(decks, deck_count);
         needsUpdate = false;
     }
 }
-
 // Detects rotary encoder movement, returns 1 for CW, -1 for CCW, 0 for no movement
 int rotary_encoder_moved() {
     int MSB = digitalRead(ROTARY_CLK);
@@ -218,8 +250,6 @@ int rotary_encoder_moved() {
     return 0;  // No movement
 }
 
-
-// Detects rotary button press: 1 for short press, 2 for long press, 0 for no press
 int rotary_button_pressed() {
     bool rotaryButtonState = digitalRead(ROTARY_SW) == LOW;
     bool shortButtonState = digitalRead(BUTTON_SHORT) == LOW;
@@ -230,25 +260,37 @@ int rotary_button_pressed() {
     static unsigned long lastLongButtonTime = 0;
     static bool shortButtonPressed = false;
     static bool longButtonPressed = false;
+    static bool longPressActive = false;
+    static bool wasRotaryButtonPressed = false;
 
-    // Check the rotary encoder button first (original functionality)
+    // Check the rotary encoder button with state tracking
     if (rotaryButtonState) {
+        wasRotaryButtonPressed = true;
         if (lastButtonPressTime == 0) lastButtonPressTime = currentPressTime;
 
-        if (currentPressTime - lastButtonPressTime >= LONG_PRESS_DELAY && !longPressHandled) {
-            longPressHandled = true;
-            return 2;  // Long press detected
+        if (currentPressTime - lastButtonPressTime >= LONG_PRESS_DELAY) {
+            if (!longPressHandled) {
+                longPressHandled = true;
+                longPressActive = true;
+                jogPitchLongPressActive = true;
+                printf("Long press detected, jogPitchLongPressActive set to true\n");
+            }
         }
-    } else {
-        if (lastButtonPressTime > 0 && currentPressTime - lastButtonPressTime < LONG_PRESS_DELAY) {
+    } else if (wasRotaryButtonPressed) {  // Button just released
+        wasRotaryButtonPressed = false;
+        if (longPressActive) {
+            printf("Long press released, jogPitchLongPressActive set to false\n");
+            longPressActive = false;
+            jogPitchLongPressActive = false;
+        } else if (lastButtonPressTime > 0 && currentPressTime - lastButtonPressTime < LONG_PRESS_DELAY) {
             lastButtonPressTime = 0;
             longPressHandled = false;
-            return 1;  // Short press detected
+            return 3;  // Short press detected
         }
         lastButtonPressTime = 0;
         longPressHandled = false;
     }
-    
+
     // Check the dedicated short press button with debouncing
     if (shortButtonState && !shortButtonPressed && 
         (currentPressTime - lastShortButtonTime > BUTTON_DEBOUNCE_DELAY)) {
@@ -271,6 +313,8 @@ int rotary_button_pressed() {
     
     return 0;  // No button press detected
 }
+
+
 void trigger_io_event(unsigned char action, unsigned char deckNo, unsigned char param) {
     struct mapping temp_map = {0}; // Temporary mapping structure
     temp_map.Action = action;
