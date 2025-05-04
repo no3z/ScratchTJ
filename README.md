@@ -3,6 +3,27 @@
 
 # ScratchTJ: Tinkering a DIY Digital Turntable with Raspberry Pi 
 
+# Updated 02/05/2025 Added 2 additional buttons and new functionality
+
+After some use it was clear that pressing the rotary encoder was a PITA so with some free time in the horizont a new add-on printable structure with capacity to hold two new buttons was designed and added to the scratchTJ structure. 
+
+Here is a new edited video of scrtachTJ in action:
+
+Click to watch!!
+[![Watch the video](https://img.youtube.com/vi/dSP_wy3YE4I/maxresdefault.jpg)](https://youtu.be/dSP_wy3YE4I)
+
+Those 2 buttons are for navigation purposes, **enter** and **back**. This makes navigating the menus friendlier. 
+
+Now the rotary encoder **press** and **long press** actions can be used for other purposes. 
+
+In latest commit, now holding the rotary encoder **long press** enters Pitch Mode, which allows setting the deck playback speed.
+
+![2 buttons](https://github.com/no3z/ScratchTJ/raw/master/docs/2buttons.png)
+ - **Buttons extender**: [Tinkercad Model](https://www.tinkercad.com/things/4uivv2bXmRU-button-extender-scratch)
+   
+
+# The journey
+
 The journey of creating a DIY digital turntable began with a spark of inspiration from two YouTube videos: [SC500 DIY CDJ build](https://www.youtube.com/watch?v=j9CJ7EI0yY4) and [SC1000 Open Source Turntable](https://youtu.be/Llxfi6l2I-U). If you're interested in buying one, check out the [SC1000 MK2 here](https://portablismgear.com/sc1000/devices/sc1000mk2.html). It’s honestly a fantastic piece of gear if you can get your hands on it. The innovative work by **the_rasteri** on these models captivated me, and the idea of building a custom digital turntable took root. 
 The goal was clear: adapt [the open-source code of the SC1000](https://github.com/rasteri/SC1000) to work on a Raspberry Pi 2 equipped with an AudioInjector audio hat, and create a functional, customizable digital turntable using readily available components. Let's dive into how this all came together. 
 
@@ -50,6 +71,8 @@ To enhance the functionality, I sourced a magnetoelectric rotary encoder and a D
  -  **DJ Fader** 
  -  **Magnetoelectric Rotary Encoder** 
  -  **Hard Drive Platter**
+   
+![alicomponents](https://github.com/no3z/ScratchTJ/raw/master/docs/alicomponents.png)
 
 ## 3D Printing and Enclosure Design
 
@@ -57,8 +80,8 @@ To enhance the functionality, I sourced a magnetoelectric rotary encoder and a D
 ![Resistor Array](https://github.com/no3z/ScratchTJ/raw/master/docs/IMG_3893.jpg)
 ### HDD Adapter and Enclosure
  To house the components and provide a user-friendly interface, I designed custom parts in Tinkercad: 
- - **HDD Adapter**: [Tinkercad Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter)  The HDD adapter features channels for a 1.5mm wire to connect the platter to the shaft, enabling touch sensitivity.
- -  **Enclosure**: [Tinkercad Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0) The enclosure was designed to accommodate all components, though initial prints required adjustments to fit the Raspberry Pi properly.
+ - **HDD Adapter**: [Tinkercad Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter?sharecode=nWsXvmSv_DllBxx8CcdytpptvyzZCUKnqFkQ3bDZFho)  The HDD adapter features channels for a 1.5mm wire to connect the platter to the shaft, enabling touch sensitivity.
+ -  **Enclosure**: [Tinkercad Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0.1?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y) The enclosure was designed to accommodate all components, though initial prints required adjustments to fit the Raspberry Pi properly.
 
 
 ## Software Development
@@ -80,7 +103,7 @@ The system was expanded to:
 
 ## Wrapping Up
 
-If you're interested in making your own ScratchTJ or have ideas to improve it, I'd love to hear from you. The project isn’t perfect, and there are still so many ways to make it better, but that’s the beauty of open-source projects: it’s all about iteration and collaboration.
+If you're interested in making your own ScratchTJ or have ideas to improve it, I'd love to hear from you. The project isn’t perfect, and there are still so many ways to make it better, but that’s the beauty of open-source projects: it’s all about iteration and collaboration. I know there is a lot of stuff left behind to fully write a DIY guide, so 
 
 Kiitos paljon ja happy scratching!
 
