@@ -536,13 +536,7 @@ void read_serial_data() {
 					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
 					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
 					capIsTouched = 0;
-
-					// Apply encoder direction correction based on jogReverse setting
-					// Normal mode: invert encoder (hardware sends reversed direction)
-					// Reverse mode: use encoder as-is
-					if (!scsettings.jogReverse) {
-						encoder_value = 4096 - encoder_value;  // Normal mode needs inversion
-					}
+					encoder_value = 4096 - encoder_value;
 
 					if (capacitive_value > 5000) {
 						capIsTouched = 1; // Set touched if capacitance exceeds threshold
@@ -598,7 +592,10 @@ void process_rot()
 	int8_t crossedZero; // 0 when we haven't crossed zero, -1 when we've crossed in anti-clockwise direction, 1 when crossed in clockwise
 	int wrappedAngle = 0x0000;
 	// Handle rotary sensor
-	// Note: jogReverse direction is now handled in read_serial_data() to avoid double-inversion
+
+	if (scsettings.jogReverse) {
+		deck[1].newEncoderAngle = 4095 - deck[1].newEncoderAngle;
+	}
 
 	// First time, make sure there's no difference
 	if (deck[1].encoderAngle == 0xffff)
