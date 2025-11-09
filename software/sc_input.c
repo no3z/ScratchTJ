@@ -536,11 +536,12 @@ void read_serial_data() {
 					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
 					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
 					capIsTouched = 0;
-					encoder_value = 4096 - encoder_value;
+					// Removed permanent inversion - let jogReverse handle direction in process_rot()
+					// encoder_value = 4096 - encoder_value;
 
 					if (capacitive_value > 5000) {
 						capIsTouched = 1; // Set touched if capacitance exceeds threshold
-					} 
+					}
                     // printf("Fader: %d, Encoder: %d Capcitative: %d Touched: %d diff: %d\n", ADCs[0], encoder_value, capacitive_value, capIsTouched,  (abs(encoder_value - deck[1].newEncoderAngle) > )  );
 
                     deck[1].newEncoderAngle = encoder_value;
@@ -625,12 +626,12 @@ void process_rot()
 	// rotary sensor sometimes returns incorrect values, if we skip more than 100 ignore that value
 	// If we see 3 blips in a row, then I guess we better accept the new value
 
-	// if (abs(deck[1].newEncoderAngle - wrappedAngle) > 100 && numBlips < 2)
-	// {
-	// 	// printf("blip! %d %d %d %d\n", deck[1].newEncoderAngle-deck[1].encoderAngle, deck[1].newEncoderAngle, wrappedAngle, numBlips);
-	// 	numBlips++;
-	// }
-	// else
+	if (abs(deck[1].newEncoderAngle - wrappedAngle) > 100 && numBlips < 2)
+	{
+		// printf("blip! %d %d %d %d\n", deck[1].newEncoderAngle-deck[1].encoderAngle, deck[1].newEncoderAngle, wrappedAngle, numBlips);
+		numBlips++;
+	}
+	else
 	{
 		numBlips = 0;
 		deck[1].encoderAngle = deck[1].newEncoderAngle;
