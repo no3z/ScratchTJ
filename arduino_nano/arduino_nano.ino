@@ -28,7 +28,7 @@ void setup() {
 }
 
 unsigned long previousMillis = 0;
-const unsigned long interval = 2; // Increased from 10ms to 2ms (500Hz) for smoother scratching
+const unsigned long interval = 5; // 5ms (200Hz) - optimal balance for serial + capacitive sensor timing
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -47,8 +47,8 @@ void loop() {
     int mapped_angle = (currentEncoderValue % CPR) * 4096 / CPR;
     if (mapped_angle < 0) mapped_angle += 4096; // Ensure positive value
 
-    // Read capacitive sensor value
-    long capacitiveValue = capSensor.capacitiveSensor(10); // Reduced from 30 to 10 samples for faster response
+    // Read capacitive sensor value (5 samples for minimal delay)
+    long capacitiveValue = capSensor.capacitiveSensor(5);
 
     // Send the values over serial
     Serial.print(faderValue);
