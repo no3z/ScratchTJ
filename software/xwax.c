@@ -365,10 +365,10 @@ int main(int argc, char *argv[])
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
 	float platterspeed = 3072.0f;
-	float target_pitch = 16.0f; //10 for a 1024 buffer size
-	float pitch_mixer = 0.115f; 
-	float clamp_pitch = 12.5; 
-	float skip_pitch = 4.f; 
+	float target_pitch = 40.0f; // Increased from 16 to match original SC1000 for proper scratch response
+	float pitch_mixer = 0.1f; // Reduced from 0.115 to 0.1 to match original SC1000 smoothing
+	float clamp_pitch = 20.0; // Increased from 12.5 to 20.0 to allow full scratch range
+	float skip_pitch = 0.f; // Disabled (was 4.0) to eliminate flutter during scratching 
 
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
