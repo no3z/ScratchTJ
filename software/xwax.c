@@ -93,7 +93,7 @@ void loadSettings()
 	unsigned char midicommand[3];
 	char *linetok, *valuetok;
 	// set defaults
-	scsettings.buffersize = 128;
+	scsettings.buffersize = 256; // Increased from 128 to match original SC1000, reduces interrupts and flutter
 	scsettings.faderclosepoint = 2;
 	scsettings.faderopenpoint = 10;
 	scsettings.platterenabled = 1;
