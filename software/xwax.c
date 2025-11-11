@@ -48,6 +48,7 @@
 #include "sc_midimap.h"
 #include "dicer.h"
 #include "lcd_menu.h"
+#include "preset_menu.h"
 #include "shared_variables.h"
 
 #define DEFAULT_IMPORTER EXECDIR "/xwax-import"
@@ -398,7 +399,13 @@ int main(int argc, char *argv[])
 
 	// Start input processing thread
 	lcd_menu_init(decks, 2); // Initialize LCD menu with both decks
-	
+
+	// Load last preset if available
+	int last_preset = load_last_preset_number();
+	if (last_preset > 0 && last_preset <= 3) {
+		printf("Loading last preset: %d\n", last_preset);
+		load_preset_from_slot(last_preset, decks);
+	}
 
 	// Start realtime stuff
 

@@ -6,6 +6,7 @@
 #include "deck_menu.h"
 #include "controller_menu.h"
 #include "info_menu.h"
+#include "preset_menu.h"
 #include "sc_midimap.h" // Ensure this header is included
 
 
@@ -19,6 +20,7 @@ typedef enum {
     MENU_DECK1,
     MENU_DECK2,
     MENU_CONTROLLER,
+    MENU_PRESETS,
     MENU_INFO
 } MainMenuState;
 

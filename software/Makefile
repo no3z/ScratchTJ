@@ -71,6 +71,7 @@ OBJS = controller.o \
 	main_menu.o \
 	deck_menu.o \
 	controller_menu.o \
+	preset_menu.o \
 	info_menu.o \
 	lcd_menu.o \
 	shared_variables.o \

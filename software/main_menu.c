@@ -3,13 +3,14 @@
 #include "main_menu.h"
 #include "deck_menu.h"
 #include "controller_menu.h"
+#include "preset_menu.h"
 #include "info_menu.h"
 
 extern bool needsUpdate;
 
-char *mainMenuOptions[] = {"Deck1 Menu", "Deck2 Menu", "Config Menu", "Info Menu"};
+char *mainMenuOptions[] = {"Deck1 Menu", "Deck2 Menu", "Config Menu", "Presets Menu", "Info Menu"};
 static int selectedItem = 1;
-static int menuSize = 4;
+static int menuSize = 5;
 
 extern MainMenuState mainMenuState;
 
@@ -36,6 +37,9 @@ void display_main_menu(struct deck *decks[], int deck_count) {
                 break;
             case MENU_CONTROLLER:
                 display_controller_menu(decks[1], 1);
+                break;
+            case MENU_PRESETS:
+                display_preset_menu();
                 break;
             case MENU_INFO:
                 display_info_menu_actions();
@@ -73,6 +77,9 @@ void handle_main_menu_navigation(struct deck *decks[], int deck_count) {
                     mainMenuState = MENU_CONTROLLER;
                     break;
                 case 3:
+                    mainMenuState = MENU_PRESETS;
+                    break;
+                case 4:
                     mainMenuState = MENU_INFO;
                     break;
                 default:
@@ -93,9 +100,12 @@ void handle_main_menu_navigation(struct deck *decks[], int deck_count) {
             case MENU_CONTROLLER:
                 handle_controller_menu_navigation(decks[0],1);
                 break;
+            case MENU_PRESETS:
+                handle_preset_menu_navigation(decks);
+                break;
             case MENU_INFO:
                 handle_info_menu_navigation();
                 break;
-        }        
+        }
     }
 }
