@@ -8,6 +8,8 @@ A fully open-source portable scratch instrument built around a Raspberry Pi, Ard
 
 [![Watch the video](https://img.youtube.com/vi/rufXcn8hjYE/maxresdefault.jpg)](https://youtu.be/rufXcn8hjYE)
 
+**📖 [Full Build Guide](docs/BUILD_GUIDE.md)** — Step-by-step instructions with wiring diagrams, pin connections, and troubleshooting.
+
 ## Features
 
 - Two independent decks: beats + scratch sample, mixed through a DJ fader
