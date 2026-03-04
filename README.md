@@ -1,86 +1,196 @@
+# ScratchTJ: DIY Digital Turntable with Raspberry Pi
 
-  
+A fully open-source portable scratch instrument built around a Raspberry Pi, Arduino Nano, and the [xwax](http://www.xwax.co.uk/) digital vinyl emulation engine. Inspired by the [SC1000 Open Source Turntable](https://github.com/rasteri/SC1000) by **the_rasteri**.
 
-# ScratchTJ: Tinkering a DIY Digital Turntable with Raspberry Pi 
+**Demo video** (click to watch):
 
-The journey of creating a DIY digital turntable began with a spark of inspiration from two YouTube videos: [SC500 DIY CDJ build](https://www.youtube.com/watch?v=j9CJ7EI0yY4) and [SC1000 Open Source Turntable](https://youtu.be/Llxfi6l2I-U). If you're interested in buying one, check out the [SC1000 MK2 here](https://portablismgear.com/sc1000/devices/sc1000mk2.html). It’s honestly a fantastic piece of gear if you can get your hands on it. The innovative work by **the_rasteri** on these models captivated me, and the idea of building a custom digital turntable took root. 
-The goal was clear: adapt [the open-source code of the SC1000](https://github.com/rasteri/SC1000) to work on a Raspberry Pi 2 equipped with an AudioInjector audio hat, and create a functional, customizable digital turntable using readily available components. Let's dive into how this all came together. 
-
-But first: one demo video of the thing running: (Click to watch)
+[![Watch the video](https://img.youtube.com/vi/dSP_wy3YE4I/maxresdefault.jpg)](https://youtu.be/dSP_wy3YE4I)
 
 [![Watch the video](https://img.youtube.com/vi/rufXcn8hjYE/maxresdefault.jpg)](https://youtu.be/rufXcn8hjYE)
 
-## The Spark of Inspiration
-![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/sc500_teal_transp_3.jpg)
+## Features
 
+- Two independent decks: beats + scratch sample, mixed through a DJ fader
+- 600 PPR rotary encoder platter with capacitive touch via HDD platter
+- 1602A LCD display with rotary encoder for menu navigation
+- Two dedicated navigation buttons (Enter / Back) on GPIO 17 and 27
+- 5-slot preset system to save and load all settings
+- Binary serial protocol at 500 kbaud between Arduino and Pi
+- All key parameters tunable in real time from the LCD config menu
+- ALSA mixer control and recording from the sound card inputs
+- MIDI input support for external controllers
+- Pitch mode via rotary encoder long press
 
-## The Journey Begins
-### Exploring the SC1000 Code 
-Discovering that the SC500 units were scarce and difficult to purchase, I turned my attention to the [SC1000's open-source code](https://github.com/rasteri/SC1000). Diving into the codebase, I sought ways to initialize a 1602 LCD display and integrate it with [xwax](http://www.xwax.co.uk/), an open-source digital vinyl emulation software.
-### Initial Hardware Tests
- The first step was to get the LCD screen operational and establish communication with the Raspberry Pi. I experimented with the 1602A LCD display, ensuring it could display text and respond to inputs. Concurrently, I began working with a rotary encoder to navigate menus and control parameters.
+## Architecture
+
+```
++--------------+   Serial 500kbaud   +--------------+   I2S Audio   +-----------------+
+| Arduino Nano | ------------------- | Raspberry Pi | ------------ | AudioInjector   |
+|              |   8-byte binary pkt |              |              | Sound Card      |
+| - Encoder    |   (sync+data+XOR)   | - xwax       |              +-----------------+
+| - Fader      |                     | - LCD menu   |
+| - Cap sensor |                     | - MIDI       |
++--------------+                     +--------------+
+```
+
+The Arduino reads the 600 PPR rotary encoder (2400 CPR with 4x quadrature decoding), the DJ crossfader, and the capacitive touch sensor at 200 Hz. Data is sent as 8-byte binary packets with XOR checksum. The Raspberry Pi runs the audio engine, LCD menu system, and MIDI processing.
+
+## Bill of Materials
+
+- **Raspberry Pi 2** (or compatible)
+- **AudioInjector Sound Card** (I2S audio hat)
+- **1602A LCD Display with I2C IC**
+- **Rotary Encoder with Push Button** (for menu navigation)
+- **600 PPR Magnetoelectric Rotary Encoder** (for the platter)
+- **Arduino Nano** (connected via TX/RX serial at 500 kbaud)
+- **DJ Fader**
+- **Hard Drive Platter** (capacitive touch surface)
+- **1200 Ohm Resistor**
+- **2x Push Buttons** (Enter/Back, on GPIO 17 and 27)
+
+![AliExpress Components](https://github.com/no3z/ScratchTJ/raw/main/docs/alicomponents.png)
+
+## 3D Printed Parts
+
+All parts were designed in Tinkercad and can be printed on a standard FDM printer.
+
+- **HDD Adapter**: [Tinkercad Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter?sharecode=nWsXvmSv_DllBxx8CcdytpptvyzZCUKnqFkQ3bDZFho) - Channels for 1.5 mm wire connecting the platter to the shaft for capacitive touch.
+- **Enclosure**: [Tinkercad Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0.1?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y) - Houses all components.
+- **Buttons Extender**: [Tinkercad Model](https://www.tinkercad.com/things/4uivv2bXmRU-button-extender-scratch) - Add-on structure for the two navigation buttons.
+
+![2 Buttons Add-on](https://github.com/no3z/ScratchTJ/raw/main/docs/2buttons.png)
+
+![3D Print 1](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3892.jpg)
+![3D Print 2](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3893.jpg)
+
+## Build Photos
+
 ![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/soldering_station_setup.jpg)
-### Integrating the Rotary Encoder
- With some assistance from GPT-powered coding suggestions, I developed C code to handle rotary encoder events. This allowed for start/stop control of the decks and adjustment of various parameters displayed on the LCD screen.
-
-## Expanding the Hardware
- ### Acquiring New Components
-To enhance the functionality, I sourced a magnetoelectric rotary encoder and a DJ fader from AliExpress. I also upgraded the LCD display to a 1602A with an integrated circuit (IC) to reduce the GPIO pin usage on the Raspberry Pi.
-
-![Final Enclosure](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
+![Enclosure and Controls](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
 ![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/main/docs/testing_assembly.jpg)
-### Introducing the Arduino Nano
- Realizing the need for additional processing capabilities to handle the fader and the rotary encoder, I incorporated an Arduino Nano into the setup. The Arduino reads the input from these components and communicates with the Raspberry Pi via serial connection (TX/RX).
-
-### Adding Capacitive Touch
- To emulate the feel of a real turntable, I wanted to incorporate capacitive touch sensitivity. Initial attempts using electric paint on a CD proved inadequate. The solution was to use an open hard drive (HDD) platter connected to the magnetoelectric rotary encoder. The platter, connected to the Arduino Nano acting as a capacitive sensor, provided the desired touch sensitivity.
-
-
 ![Workbench Setup](https://github.com/no3z/ScratchTJ/raw/main/docs/initial_build_setup.jpg)
 ![Optical Encoder and HDD Platter](https://github.com/no3z/ScratchTJ/raw/main/docs/optical_encoder_and_platter.jpg)
 
-## Bill of Materials (BOM)
- - **Raspberry Pi 2** 
- - **AudioInjector Sound Card** 
- - **1602A LCD Display with IC** 
- -  **Rotary Encoder with Push Button** 
- -  **Arduino Nano** (connected via TX/RX serial)
- -  **1200Ω Resistor** 
- -  **DJ Fader** 
- -  **Magnetoelectric Rotary Encoder** 
- -  **Hard Drive Platter**
+## Software Overview
 
-## 3D Printing and Enclosure Design
+The software is a fork of the [SC1000 codebase](https://github.com/rasteri/SC1000) heavily modified for this hardware. Key source files:
 
-![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3892.jpg)
-![Resistor Array](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3893.jpg)
-### HDD Adapter and Enclosure
- To house the components and provide a user-friendly interface, I designed custom parts in Tinkercad: 
- - **HDD Adapter**: [Tinkercad Model](https://www.tinkercad.com/things/61eF1Ijn7o5-hdd-adapter)  The HDD adapter features channels for a 1.5mm wire to connect the platter to the shaft, enabling touch sensitivity.
- -  **Enclosure**: [Tinkercad Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0) The enclosure was designed to accommodate all components, though initial prints required adjustments to fit the Raspberry Pi properly.
+| File | Purpose |
+|------|---------|
+| `arduino_nano/arduino_nano.ino` | Arduino firmware: encoder, fader, cap sensor, binary serial protocol |
+| `software/sc_input.c` | Serial reader, encoder processing, platter-to-audio position mapping |
+| `software/player.c` | Audio engine with cubic interpolation, pitch filtering, slipmat simulation |
+| `software/xwax.c` | Main application, deck init, shared variable registration |
+| `software/lcd_menu.c` | LCD display, rotary encoder menu navigation, 2-button support |
+| `software/controller_menu.c` | Config menu: Sound Settings, Global Settings, Info, Presets |
+| `software/preset_menu.c` | 5-slot preset save/load/reset system |
+| `software/shared_variables.c` | Thread-safe runtime variable system for LCD-tunable parameters |
+| `software/scsettings.txt` | Persistent configuration file |
 
+### LCD Menu Structure
 
-## Software Development
- ### Customizing the SC1000 Code 
- Analyzing the SC1000 source code, I identified areas to integrate the new hardware components. Modifications included: 
- - Initializing the 1602A LCD display. 
- - Handling input from the Arduino Nano for the fader and rotary encoder. 
- -  Implementing capacitive touch functionality for the platter. 
- -  Extending menu options to adjust fader settings, platter speed, pitch factor, and more in real-time. 
-![Watch the video](https://img.youtube.com/vi/jpz3jol8UZQ/maxresdefault.jpg)](https://youtu.be/jpz3jol8UZQ)
-(Click to watch)
-### Additional Features 
-The system was expanded to: 
-- Control ALSA mixer parameters for the sound card. 
--  Enable recording from the sound card inputs. 
--  Provide adjustable fader settings (cut curve, cut position switch).
-[![Watch the video](https://img.youtube.com/vi/uF4GSIXVzZU/maxresdefault.jpg)](https://youtu.be/uF4GSIXVzZU)
-(Click to watch)
+```
+Main Menu
+|-- Deck 0 (Beats) -- file browse, transport, volume, cue points
+|-- Deck 1 (Samples) -- file browse, transport, volume, cue points
++-- Config
+    |-- Sound Settings -- ALSA mixer controls
+    |-- Global Settings -- all runtime-tunable parameters (see below)
+    |-- Info -- system information
+    +-- Presets -- save/load/reset across 5 slots
+```
 
-## Wrapping Up
+Navigation: rotary encoder scrolls, **Enter** button (GPIO 17) selects, **Back** button (GPIO 27) returns. Long-pressing the rotary encoder enters **Pitch Mode** for adjusting deck playback speed.
 
-If you're interested in making your own ScratchTJ or have ideas to improve it, I'd love to hear from you. The project isn’t perfect, and there are still so many ways to make it better, but that’s the beauty of open-source projects: it’s all about iteration and collaboration.
+### Runtime-Tunable Parameters
 
-Kiitos paljon ja happy scratching!
+All of these can be adjusted live from the LCD Config > Global Settings menu:
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| Fad Factor | 0.1 | 0.1 - 10 | Fader curve transition point |
+| Fad Power | 0.2 | 0.1 - 10 | Fader curve exponent |
+| Fad Switch | 1.0 | 0 - 1 | Fader direction (0=normal, 1=reversed) |
+| slippiness | 200 | 1 - 3000 | Slipmat simulation feel |
+| target_pitch | 15 | 1 - 240 | Position tracking gain |
+| brakespeed | 3000 | 1 - 10000 | Stop button deceleration rate |
+| platterspeed | 1333 | 1 - 8192 | Encoder-to-audio position ratio |
+| blipthreshold | 59 | 50 - 2048 | Encoder glitch rejection threshold |
+| pitch_filter | 0.2 | 0.01 - 1.0 | Pitch low-pass filter (0=smooth, 1=instant) |
+| cap_threshold | 5000 | 500 - 30000 | Capacitive touch activation level |
+| cap_hysteresis | 500 | 0 - 5000 | Touch on/off hysteresis band |
+
+### Serial Protocol
+
+The Arduino and Pi communicate using a compact binary protocol at 500 kbaud:
+
+```
+Byte:  [0]    [1]    [2]    [3]     [4]     [5]    [6]    [7]
+       SYNC   fHi    fLo    angHi   angLo   capHi  capLo  XOR
+       0xAA   ---fader----   ---encoder---   --capacitive-  checksum
+```
+
+On startup the Pi sends `0x53` ('S'), the Arduino replies `'T'` to confirm the link. A watchdog on the Pi side detects 2-second timeouts and auto-reconnects, with DTR hard-reset of the Arduino after 3 consecutive failures.
+
+### Encoder Optimizations
+
+The system is tuned for a 600 PPR encoder (2400 CPR with 4x quadrature decoding). Unlike the original SC1000's AS5601 magnetic sensor (4096 steps, absolute position over I2C), this uses incremental quadrature with interrupt-driven counting on the Arduino. Key optimizations:
+
+- Native 2400 CPR throughout the pipeline, no lossy mapping to 4096
+- Velocity estimation between serial frames for position interpolation
+- Cached shared variable pointers in the audio hot path (no strcmp/mutex per frame)
+- Full quadrature state table for the menu rotary encoder (all 4 transitions detected)
+- Capacitive touch hysteresis to prevent flicker-induced audio clicks
+
+## Building
+
+### Prerequisites (on the Raspberry Pi)
+
+- GCC, make
+- SDL2 development libraries
+- ALSA development libraries
+- wiringPi
+
+### Compile
+
+```bash
+cd software
+make
+```
+
+### Flash the Arduino
+
+Open `arduino_nano/arduino_nano.ino` in the Arduino IDE. Install the `CapacitiveSensor` library, select Arduino Nano, and upload. Both the Arduino firmware and the Pi software must be updated together since they share the binary serial protocol.
+
+### Run
+
+```bash
+cd software
+./xwax
+```
+
+Audio samples go in `~/samples/` (scratch deck) and `~/beats/` (beat deck). The paths are configured in `xwax.c`.
+
+## Project History
+
+This project started as an adaptation of the SC1000 to run on a Raspberry Pi 2 with an AudioInjector audio hat. The original SC1000 runs on an Olimex A13 board with a custom PCB. ScratchTJ replaces the custom PCB with off-the-shelf components (Arduino Nano, standard rotary encoder, DJ fader) and uses serial communication instead of I2C/SPI.
+
+The initial inspiration came from these videos: [SC500 DIY CDJ build](https://www.youtube.com/watch?v=j9CJ7EI0yY4) and [SC1000 Open Source Turntable](https://youtu.be/Llxfi6l2I-U). If you want the real deal, check out the [SC1000 MK2](https://portablismgear.com/sc1000/devices/sc1000mk2.html).
+
+## More Videos
+
+[![Scratching demo](https://img.youtube.com/vi/jpz3jol8UZQ/maxresdefault.jpg)](https://youtu.be/jpz3jol8UZQ)
+
+[![Fader and controls](https://img.youtube.com/vi/uF4GSIXVzZU/maxresdefault.jpg)](https://youtu.be/uF4GSIXVzZU)
+
+## Contributing
+
+If you're interested in building your own ScratchTJ or have ideas to improve it, feel free to open an issue or PR. The project is not perfect, and there are still many ways to make it better -- that's the beauty of open source.
+
+## License
+
+Based on [xwax](http://www.xwax.co.uk/) by Mark Hills, licensed under GNU GPL v2.
 
 ---
+
+Kiitos paljon ja happy scratching!
