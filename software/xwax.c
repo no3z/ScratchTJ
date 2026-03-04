@@ -364,9 +364,9 @@ int main(int argc, char *argv[])
 	float input_curveSwitch = 1.0f;
 	float slippiness = 200.f;
 	float brakespeed = 3000.f;
-	float platterspeed = 3072.0f;
+	float platterspeed = 1800.0f; // 2400 CPR * 0.75 rev/sec (45RPM). For 33RPM use ~1320
 	float target_pitch = 15.0f; //10 for a 1024 buffer size
-	float blipthreshold = 400.0f; // Max angle change per frame before filtering (encoder glitch rejection)
+	float blipthreshold = 250.0f; // Max angle change per frame before filtering (encoder glitch rejection, scaled for 2400 CPR)
 	float pitch_filter = 0.1f; // Pitch low-pass filter alpha (0.0=very smooth/laggy, 1.0=instant/noisy)
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);

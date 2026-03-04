@@ -12,7 +12,7 @@ CapacitiveSensor capSensor = CapacitiveSensor(sendPin, sensePin);
 volatile long encoderValue = 0; // Use long to handle large counts
 volatile byte lastEncoded = 0;
 
-const int CPR = 4096; // Counts Per Revolution (1024 PPR encoder with 4x quadrature decoding)
+const int CPR = 2400; // Counts Per Revolution (600 PPR encoder with 4x quadrature decoding)
 
 void setup() {
   pinMode(encoderPinA, INPUT_PULLUP); // Use internal pull-up resistors
@@ -43,12 +43,10 @@ void loop() {
     currentEncoderValue = encoderValue;
     interrupts();
 
-    // Map encoderValue to 0 - 4095 range
-    // With CPR=4096 this is a 1:1 identity mapping (no rounding errors).
-    // The round() is kept as a safety net in case CPR is changed to a non-4096 value.
-    long normalised = ((currentEncoderValue % CPR) + CPR) % CPR;
-    int mapped_angle = (int)round((double)normalised * 4096.0 / CPR);
-    if (mapped_angle >= 4096) mapped_angle = 0; // Clamp wrap-around
+    // Send raw encoder position in 0 to CPR-1 range (0-2399)
+    // No mapping to 4096 — the software side uses CPR directly,
+    // so every encoder tick = exactly 1 unit with zero rounding error.
+    int angle = (int)(((currentEncoderValue % CPR) + CPR) % CPR);
 
     // Read capacitive sensor value
     long capacitiveValue = capSensor.capacitiveSensor(30); // Adjust sample size (30)
@@ -56,7 +54,7 @@ void loop() {
     // Send the values over serial
     Serial.print(faderValue);
     Serial.print(" ");
-    Serial.print(mapped_angle);
+    Serial.print(angle);
     Serial.print(" ");
     Serial.println(capacitiveValue); // Add capacitive value to output
   }

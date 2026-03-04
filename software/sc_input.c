@@ -507,6 +507,10 @@ unsigned char buttonState = 0;
 unsigned int butCounter = 0;
 unsigned char faderOpen1 = 0, faderOpen2 = 0;
 
+// Encoder counts per revolution: 600 PPR * 4x quadrature = 2400 CPR
+// Must match CPR in arduino_nano.ino. All wrap/boundary logic uses this.
+#define ENCODER_CPR 2400
+
 #define BUFFER_SIZE 256
 char read_buffer[BUFFER_SIZE];
 char line_buffer[BUFFER_SIZE];
@@ -536,7 +540,7 @@ void read_serial_data() {
 					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
 					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
 					capIsTouched = 0;
-					encoder_value = 4096 - encoder_value;
+					encoder_value = ENCODER_CPR - encoder_value;
 
 					if (capacitive_value > 5000) {
 						capIsTouched = 1; // Set touched if capacitance exceeds threshold
@@ -594,9 +598,7 @@ void process_rot()
 	// Handle rotary sensor
 
 	if (scsettings.jogReverse) {
-		//printf("%d,",deck[1].newEncoderAngle);
-		deck[1].newEncoderAngle = 4095 - deck[1].newEncoderAngle;
-		//printf("%d\n",deck[1].newEncoderAngle);
+		deck[1].newEncoderAngle = (ENCODER_CPR - 1) - deck[1].newEncoderAngle;
 	}
 
 	// First time, make sure there's no difference
@@ -605,16 +607,16 @@ void process_rot()
 
 	// Handle wrapping at zero
 
-	if (deck[1].newEncoderAngle < 1024 && deck[1].encoderAngle >= 3072)
+	if (deck[1].newEncoderAngle < (ENCODER_CPR / 4) && deck[1].encoderAngle >= (ENCODER_CPR * 3 / 4))
 	{ // We crossed zero in the positive direction
 
 		crossedZero = 1;
-		wrappedAngle = deck[1].encoderAngle - 4096;
+		wrappedAngle = deck[1].encoderAngle - ENCODER_CPR;
 	}
-	else if (deck[1].newEncoderAngle >= 3072 && deck[1].encoderAngle < 1024)
+	else if (deck[1].newEncoderAngle >= (ENCODER_CPR * 3 / 4) && deck[1].encoderAngle < (ENCODER_CPR / 4))
 	{ // We crossed zero in the negative direction
 		crossedZero = -1;
-		wrappedAngle = deck[1].encoderAngle + 4096;
+		wrappedAngle = deck[1].encoderAngle + ENCODER_CPR;
 	}
 	else
 	{
@@ -652,15 +654,16 @@ void process_rot()
 
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += 4096;
+				deck[1].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= 4096;
+				deck[1].angleOffset -= ENCODER_CPR;
 			}
 
 			// Use the angle of the platter to control sample pitch
-			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / 16384) + 1.0;
+			// 4 full revolutions (ENCODER_CPR*4) = full pitch range
+			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
 		}
 		else
 		{
@@ -698,11 +701,11 @@ void process_rot()
 
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += 4096;
+				deck[1].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= 4096;
+				deck[1].angleOffset -= ENCODER_CPR;
 			}
 
 			// Convert the raw value to track position and set player to that pos
