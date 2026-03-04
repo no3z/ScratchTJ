@@ -15,6 +15,8 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <sys/time.h>
+#include <time.h>
+#include <math.h>
 #include "sc_playlist.h"
 #include "alsa.h"
 #include "controller.h"
@@ -72,9 +74,9 @@ void init_serial(const char *port_name) {
     }
     printf("Terminal attributes fetched successfully.\n");
 
-    // Set baud rate
-    cfsetospeed(&tty, B115200);
-    cfsetispeed(&tty, B115200);
+    // Set baud rate (500000 for minimal serial latency)
+    cfsetospeed(&tty, B500000);
+    cfsetispeed(&tty, B500000);
 
     // Enable receiver and set local mode
     tty.c_cflag |= (CLOCAL | CREAD);
@@ -511,54 +513,203 @@ unsigned char faderOpen1 = 0, faderOpen2 = 0;
 // Must match CPR in arduino_nano.ino. All wrap/boundary logic uses this.
 #define ENCODER_CPR 2400
 
+// Binary protocol constants (must match Arduino)
+#define SYNC_BYTE 0xAA
+#define PACKET_SIZE 8
+#define HANDSHAKE_MAGIC 0x53  // 'S' for ScratchTJ
+
+// --- Cached shared variable pointers (avoid strcmp+mutex in hot path) ---
+// These are resolved once at init and read directly via pointer thereafter.
+static float *cached_blipthreshold = NULL;
+static float *cached_platterspeed = NULL;
+static float *cached_pitch_filter = NULL;
+static float *cached_cap_threshold = NULL;
+static float *cached_cap_hysteresis = NULL;
+static float *cached_fad_switch = NULL;
+
+void cache_variable_pointers() {
+	int count;
+	EditableVariable *vars = get_editable_variables(&count);
+	for (int i = 0; i < count; i++) {
+		if (strcmp(vars[i].name, "blipthreshold") == 0) cached_blipthreshold = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "platterspeed") == 0) cached_platterspeed = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "pitch_filter") == 0) cached_pitch_filter = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "cap_threshold") == 0) cached_cap_threshold = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "cap_hysteresis") == 0) cached_cap_hysteresis = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "Fad Switch") == 0) cached_fad_switch = vars[i].valuePtr;
+	}
+}
+
+// Fast read: no strcmp, no mutex (float reads are atomic on ARM/x86 for aligned floats)
+static inline float fast_get(float *cached) {
+	return *cached;
+}
+
+// --- Serial handshake and watchdog ---
+static bool serial_connected = false;
+static struct timespec last_packet_time;
+
+bool serial_handshake() {
+	unsigned char magic = HANDSHAKE_MAGIC;
+	write(serial_fd, &magic, 1);
+
+	// Wait up to 500ms for reply
+	struct timespec start, now;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	unsigned char reply;
+	while (1) {
+		int n = read(serial_fd, &reply, 1);
+		if (n == 1 && reply == 'T') {
+			printf("Serial handshake successful!\n");
+			serial_connected = true;
+			clock_gettime(CLOCK_MONOTONIC, &last_packet_time);
+			return true;
+		}
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		double elapsed = (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) / 1e9;
+		if (elapsed > 0.5) break;
+	}
+	printf("Serial handshake failed, retrying...\n");
+	return false;
+}
+
+void check_serial_watchdog() {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double elapsed = (now.tv_sec - last_packet_time.tv_sec) +
+	                 (now.tv_nsec - last_packet_time.tv_nsec) / 1e9;
+	if (elapsed > 2.0) { // 2 seconds without data = lost connection
+		if (serial_connected) {
+			printf("Serial watchdog: no data for %.1fs, reconnecting...\n", elapsed);
+			serial_connected = false;
+		}
+		// Flush buffers and retry handshake
+		tcflush(serial_fd, TCIOFLUSH);
+		serial_handshake();
+	}
+}
+
+// --- Binary protocol packet reader ---
 #define BUFFER_SIZE 256
-char read_buffer[BUFFER_SIZE];
-char line_buffer[BUFFER_SIZE];
-int line_index = 0;
+unsigned char read_buffer[BUFFER_SIZE];
+static int buf_pos = 0;
+static int buf_len = 0;
+
+// Position interpolation state
+static struct timespec last_encoder_time;
+static int last_raw_encoder = 0;
+static int prev_raw_encoder = 0;
+static double encoder_velocity = 0.0; // units per second
 
 void read_serial_data() {
-    int bytes_read = read(serial_fd, read_buffer, sizeof(read_buffer) - 1);
+	// Read available bytes into buffer
+	if (buf_pos >= buf_len) {
+		buf_len = read(serial_fd, read_buffer, sizeof(read_buffer));
+		buf_pos = 0;
+		if (buf_len <= 0) {
+			buf_len = 0;
+			return;
+		}
+	}
 
-    if (bytes_read > 0) {
-        read_buffer[bytes_read] = '\0'; // Null-terminate the string
+	// Process all complete packets in buffer
+	while (buf_pos <= buf_len - PACKET_SIZE) {
+		// Scan for sync byte
+		if (read_buffer[buf_pos] != SYNC_BYTE) {
+			buf_pos++;
+			continue;
+		}
 
-        for (int i = 0; i < bytes_read; i++) {
-            if (read_buffer[i] == '\n') {
-                // Process complete line
-                line_buffer[line_index] = '\0';
-                line_index = 0;
-				float curveSwitch;
-				bool switchFader = false;
-				get_variable_value("Fad Switch", &curveSwitch);
-				if(curveSwitch > 0.5) { switchFader = true; }
+		// Verify checksum
+		unsigned char *pkt = &read_buffer[buf_pos];
+		unsigned char checksum = pkt[1] ^ pkt[2] ^ pkt[3] ^ pkt[4] ^ pkt[5] ^ pkt[6];
+		if (checksum != pkt[7]) {
+			buf_pos++; // Bad checksum, skip this sync byte and rescan
+			continue;
+		}
 
-                // Parse the fader and encoder values
-                int fader_value, encoder_value, capacitive_value;
-                if (sscanf(line_buffer, "%d %d %d", &fader_value, &encoder_value, &capacitive_value) == 3) {
-					ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
-					ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
-					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
-					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
-					capIsTouched = 0;
-					encoder_value = ENCODER_CPR - encoder_value;
+		// Decode packet
+		int fader_value = (pkt[1] << 8) | pkt[2];
+		int encoder_value = (pkt[3] << 8) | pkt[4];
+		int capacitive_value = (pkt[5] << 8) | pkt[6];
 
-					if (capacitive_value > 5000) {
-						capIsTouched = 1; // Set touched if capacitance exceeds threshold
-					} 
-                    // printf("Fader: %d, Encoder: %d Capcitative: %d Touched: %d diff: %d\n", ADCs[0], encoder_value, capacitive_value, capIsTouched,  (abs(encoder_value - deck[1].newEncoderAngle) > )  );
+		buf_pos += PACKET_SIZE;
 
-                    deck[1].newEncoderAngle = encoder_value;
-                } else {
-                    printf("Malformed line: %s\n", line_buffer);
-                }
-            } else {
-                // Accumulate data in the line buffer
-                if (line_index < sizeof(line_buffer) - 1) {
-                    line_buffer[line_index++] = read_buffer[i];
-                }
-            }
-        }
-    }
+		// Update watchdog timestamp
+		clock_gettime(CLOCK_MONOTONIC, &last_packet_time);
+		serial_connected = true;
+
+		// Apply fader switch
+		bool switchFader = false;
+		if (cached_fad_switch && fast_get(cached_fad_switch) > 0.5f) switchFader = true;
+
+		ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
+		ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
+		ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
+		ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
+
+		encoder_value = ENCODER_CPR - encoder_value;
+
+		// Capacitive touch with hysteresis
+		float cap_thresh = cached_cap_threshold ? fast_get(cached_cap_threshold) : 5000.0f;
+		float cap_hyst = cached_cap_hysteresis ? fast_get(cached_cap_hysteresis) : 500.0f;
+		if (capIsTouched) {
+			// Currently touched: only release when below (threshold - hysteresis)
+			if (capacitive_value < (int)(cap_thresh - cap_hyst)) {
+				capIsTouched = 0;
+			}
+		} else {
+			// Currently not touched: only activate when above (threshold + hysteresis)
+			if (capacitive_value > (int)(cap_thresh + cap_hyst)) {
+				capIsTouched = 1;
+			}
+		}
+
+		// Compute encoder velocity for interpolation
+		struct timespec now;
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		double dt = (now.tv_sec - last_encoder_time.tv_sec) +
+		            (now.tv_nsec - last_encoder_time.tv_nsec) / 1e9;
+		if (dt > 0.0 && dt < 0.1) { // Ignore unreasonable gaps
+			int delta = encoder_value - last_raw_encoder;
+			// Handle wrap-around
+			if (delta > ENCODER_CPR / 2) delta -= ENCODER_CPR;
+			else if (delta < -ENCODER_CPR / 2) delta += ENCODER_CPR;
+			encoder_velocity = (double)delta / dt;
+		}
+		prev_raw_encoder = last_raw_encoder;
+		last_raw_encoder = encoder_value;
+		last_encoder_time = now;
+
+		deck[1].newEncoderAngle = encoder_value;
+	}
+
+	// Shift remaining bytes to start of buffer
+	if (buf_pos > 0 && buf_pos < buf_len) {
+		memmove(read_buffer, read_buffer + buf_pos, buf_len - buf_pos);
+		buf_len -= buf_pos;
+		buf_pos = 0;
+	} else if (buf_pos >= buf_len) {
+		buf_len = 0;
+		buf_pos = 0;
+	}
+}
+
+// Get interpolated encoder position between serial updates
+int get_interpolated_encoder() {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	double dt = (now.tv_sec - last_encoder_time.tv_sec) +
+	            (now.tv_nsec - last_encoder_time.tv_nsec) / 1e9;
+
+	// Only interpolate for short gaps (up to one interval)
+	if (dt > 0.0 && dt < 0.01 && fabs(encoder_velocity) > 0.5) {
+		int predicted = last_raw_encoder + (int)(encoder_velocity * dt);
+		// Wrap to 0..CPR-1
+		predicted = ((predicted % ENCODER_CPR) + ENCODER_CPR) % ENCODER_CPR;
+		return predicted;
+	}
+	return last_raw_encoder;
 }
 void process_pic()
 {
@@ -626,9 +777,8 @@ void process_rot()
 
 	// rotary sensor sometimes returns incorrect values, if we skip more than threshold ignore that value
 	// If we see 3 blips in a row, then I guess we better accept the new value
-	// Threshold is configurable via the "blipthreshold" shared variable (Config Menu → Global Settings)
-	float blipthreshold;
-	get_variable_value("blipthreshold", &blipthreshold);
+	// Threshold is read from cached pointer (no strcmp/mutex overhead)
+	float blipthreshold = cached_blipthreshold ? fast_get(cached_blipthreshold) : 250.0f;
 	if (abs(deck[1].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
 	{
 		numBlips++;
@@ -677,8 +827,7 @@ void process_rot()
 					// Positive touching edge
 					if (!deck[1].player.capTouch || oldPitchMode && !deck[1].player.stopped)
 					{
-						float platterspeed;
-						get_variable_value("platterspeed", &platterspeed);
+						float platterspeed = cached_platterspeed ? fast_get(cached_platterspeed) : 1800.0f;
 						deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
 						// printf("touch!\n");
 						deck[1].player.target_position = deck[1].player.position;
@@ -709,8 +858,7 @@ void process_rot()
 			}
 
 			// Convert the raw value to track position and set player to that pos
-				float platterspeed;
-			get_variable_value("platterspeed", &platterspeed);
+			float platterspeed = cached_platterspeed ? fast_get(cached_platterspeed) : 1800.0f;
 			deck[1].player.target_position = (double)(deck[1].encoderAngle + deck[1].angleOffset) / platterspeed;
 			// printf("blip! %d %d %d\n", deck[1].newEncoderAngle, deck[1].encoderAngle, deck[1].player.target_position);
 
@@ -755,6 +903,18 @@ void *SC_InputThread(void *ptr)
 	init_serial("/dev/serial0");
 	// init_io();
 
+	// Cache shared variable pointers for fast access in hot path
+	cache_variable_pointers();
+
+	// Initialize encoder timing
+	clock_gettime(CLOCK_MONOTONIC, &last_encoder_time);
+
+	// Perform serial handshake with Arduino
+	for (int attempt = 0; attempt < 10; attempt++) {
+		if (serial_handshake()) break;
+		usleep(200000); // 200ms between retries
+	}
+
 	srand(time(NULL)); // TODO - need better entropy source, SoC is starting up annoyingly deterministically
 
 	struct timeval tv;
@@ -780,6 +940,9 @@ void *SC_InputThread(void *ptr)
 	{
 
 		frameCount++;
+
+		// Check serial connection watchdog (reconnect if no data for 2s)
+		check_serial_watchdog();
 
 		// Update display every second
 		gettimeofday(&tv, NULL);

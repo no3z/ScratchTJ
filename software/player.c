@@ -32,6 +32,31 @@
 #include "xwax.h"
 #include "shared_variables.h"
 
+// --- Cached variable pointers for hot audio path ---
+// Resolved once at first call; avoids strcmp+mutex per audio buffer.
+static float *cached_brakespeed = NULL;
+static float *cached_slippiness = NULL;
+static float *cached_target_pitch = NULL;
+static float *cached_pitch_filter = NULL;
+static bool player_cache_init = false;
+
+static void player_init_cache() {
+	if (player_cache_init) return;
+	int count;
+	EditableVariable *vars = get_editable_variables(&count);
+	for (int i = 0; i < count; i++) {
+		if (strcmp(vars[i].name, "brakespeed") == 0) cached_brakespeed = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "slippiness") == 0) cached_slippiness = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "target_pitch") == 0) cached_target_pitch = vars[i].valuePtr;
+		else if (strcmp(vars[i].name, "pitch_filter") == 0) cached_pitch_filter = vars[i].valuePtr;
+	}
+	player_cache_init = true;
+}
+
+static inline float pfast_get(float *ptr, float fallback) {
+	return ptr ? *ptr : fallback;
+}
+
 /* Bend playback speed to compensate for the difference between our
  * current position and that given by the timecode */
 
@@ -470,6 +495,9 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	double r, pitch=0.0, target_volume, amountToDecay, target_pitch, filtered_pitch;
 	double diff;
 
+	// Initialize cached variable pointers on first call
+	player_init_cache();
+
 	pl->samplesSoFar += samples;
 
 	//pl->target_position = (sin(((double) pl->samplesSoFar) / 20000) + 1); // Sine wave to simulate scratching, used for debugging
@@ -479,8 +507,7 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	{
 		// Simulate braking
 		if (pl->motor_speed > 0.1)
-		{	float brakespeed;
-   			get_variable_value("brakespeed", &brakespeed);
+		{	float brakespeed = pfast_get(cached_brakespeed, 3000.0f);
 			pl->motor_speed = pl->motor_speed - (double)samples / (brakespeed * 10);
 		}
 		else
@@ -504,8 +531,7 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		if (pl->pitch > 20.0) pl->pitch = 20.0;
 		if (pl->pitch < -20.0) pl->pitch = -20.0;
 
-		float slippiness;
-		get_variable_value("slippiness", &slippiness);
+		float slippiness = pfast_get(cached_slippiness, 200.0f);
 		// Simulate slipmat for lasers/phasers
 		if (pl->pitch < pl->motor_speed - 0.1)
 			target_pitch = pl->pitch + (double)samples / slippiness;
@@ -526,7 +552,7 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 // Scaling Factor=𝐵original/𝐵new=256/1024=0.25
 // Scaling Factor=40×0.25=10
 
-		get_variable_value("target_pitch", &target_pitch_multiplier);
+		target_pitch_multiplier = pfast_get(cached_target_pitch, 15.0f);
 
 		target_pitch = (-diff) * target_pitch_multiplier;
 	}
@@ -534,8 +560,7 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 
 	// Pitch low-pass filter: alpha controls responsiveness vs smoothness
 	// Configurable via "pitch_filter" shared variable (Config Menu → Global Settings)
-	float pitch_alpha;
-	get_variable_value("pitch_filter", &pitch_alpha);
+	float pitch_alpha = pfast_get(cached_pitch_filter, 0.1f);
 	filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
 	amountToDecay = (DECAYSAMPLES) / (double)samples;

@@ -368,6 +368,8 @@ int main(int argc, char *argv[])
 	float target_pitch = 15.0f; //10 for a 1024 buffer size
 	float blipthreshold = 250.0f; // Max angle change per frame before filtering (encoder glitch rejection, scaled for 2400 CPR)
 	float pitch_filter = 0.1f; // Pitch low-pass filter alpha (0.0=very smooth/laggy, 1.0=instant/noisy)
+	float cap_threshold = 5000.0f; // Capacitive touch activation threshold
+	float cap_hysteresis = 500.0f; // Hysteresis band (+/- around threshold to prevent flicker)
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
@@ -377,6 +379,8 @@ int main(int argc, char *argv[])
 	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
 	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
 	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
+	register_variable("cap_threshold", &cap_threshold, 500.f, 30000.0f, 500.f);
+	register_variable("cap_hysteresis", &cap_hysteresis, 0.f, 5000.0f, 100.f);
 	
 
 	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));

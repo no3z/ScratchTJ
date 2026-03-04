@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Maximum number of editable variables
-#define MAX_VARIABLES 10
+#define MAX_VARIABLES 16
 
 // Array to store editable variables
 static EditableVariable variables[MAX_VARIABLES];
