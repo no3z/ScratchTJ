@@ -189,6 +189,38 @@ cd software
 
 Audio samples go in `~/samples/` (scratch deck) and `~/beats/` (beat deck). The paths are configured in `xwax.c`.
 
+## Recent Improvements
+
+The project has gone through a major round of fixes and optimizations. Here's what changed:
+
+### Scratch Feel
+
+- **Fixed wurbly/flutter scratching** — the original encoder mapping was non-uniform (4096 steps mapped from 600 PPR), causing audible warble. Now uses the encoder's native 2400 CPR (600 PPR × 4x quadrature) directly, eliminating the lossy mapping entirely.
+- **SC1000-calibrated defaults** — platterspeed (1333), blipthreshold (59), and pitch_filter (0.2) are now mathematically scaled from the original SC1000 values to match the 2400 CPR encoder, so the scratch feel matches the original out of the box.
+- **Dual pitch filter** — scratching (platter touched) uses the configurable `pitch_filter` for responsiveness, while released mode uses a fixed 0.1 alpha that matches the SC1000's slipmat behavior. No more weird pitch jumps on release.
+- **Slipmat overshoot clamping** — `target_pitch` is now clamped to `motor_speed` to prevent the wobble that occurred with larger audio buffers when the platter was released.
+- **Position interpolation** — encoder velocity is estimated between serial frames so the audio engine can predict platter position between 200 Hz updates, resulting in smoother scratching.
+- **Blip filter tuning** — the encoder glitch rejection threshold is now properly scaled for 2400 CPR and exposed as a tunable parameter.
+
+### Serial Communication
+
+- **Binary protocol** — replaced the old ASCII text serial with a compact 8-byte binary packet (sync + data + XOR checksum) at 500 kbaud. Much lower latency and no parsing overhead.
+- **Handshake** — the Pi sends `0x53` ('S') on startup, the Arduino replies `'T'` to confirm the link before data flows.
+- **Watchdog + DTR hard-reset** — a 2-second timeout detects serial dropouts. After 3 consecutive failures, the Pi resets the Arduino via DTR toggle, automatically recovering from hangs.
+
+### Menu and Controls
+
+- **Fixed menu rotary encoder** — the encoder was missing most turns due to incomplete state handling. Now uses a full quadrature state table (all 4 transitions) with accumulator-based debouncing at 200 Hz polling.
+- **Two-button cue system** — Enter (GPIO 17) and Back (GPIO 27) buttons work as independent hot cue triggers in the CUE screen. Short press jumps, long press sets.
+- **Pitch mode** — long-pressing the menu encoder button enters pitch adjustment mode.
+- **Capacitive touch hysteresis** — separate on/off thresholds prevent touch flickering at the boundary, which used to cause audio clicks.
+
+### Performance
+
+- **Cached shared variable pointers** — the audio hot path no longer does strcmp + mutex lookups every frame. Variable pointers are resolved once at init and read directly, saving CPU on every audio callback.
+- **5-slot preset system** — save, load, and reset all tunable parameters. Presets persist in `~/.scratchtj/presets/`. A "Reset to Defaults" option restores SC1000-calibrated values.
+- **Default value tracking** — every shared variable records its default value at registration, so preset reset works cleanly.
+
 ## Project History
 
 This project started as an adaptation of the SC1000 to run on a Raspberry Pi 2 with an AudioInjector audio hat. The original SC1000 runs on an Olimex A13 board with a custom PCB. ScratchTJ replaces the custom PCB with off-the-shelf components (Arduino Nano, standard rotary encoder, DJ fader) and uses serial communication instead of I2C/SPI.
