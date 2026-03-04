@@ -11,7 +11,6 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define ROTARY_DEBOUNCE_DELAY 5
 #define LONG_PRESS_DELAY 2000
 
 // I2C LCD Address (adjust if needed, use `i2cdetect` to find address)
@@ -31,7 +30,6 @@ static int deck_count;
 bool needsUpdate = true;
 MainMenuState mainMenuState = MENU_MAIN;
 
-static unsigned long lastTurnTime = 0;
 static unsigned long lastButtonPressTime = 0;
 static bool longPressHandled = false;
 
