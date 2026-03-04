@@ -182,27 +182,53 @@ void poll_rotary_encoder() {
 }
 
 // Detects rotary encoder movement, returns 1 for CW, -1 for CCW, 0 for no movement
+// Uses a full quadrature state table to track all 4 transitions per detent.
+// Accumulates sub-steps and only reports a move when a full detent (4 edges) is completed,
+// which provides reliable debouncing and avoids phantom steps from contact bounce.
 int rotary_encoder_moved() {
-    int MSB = digitalRead(ROTARY_CLK);
-    int LSB = digitalRead(ROTARY_DT);
-    int encoded = (MSB << 1) | LSB;
-    unsigned long currentTurnTime = millis();
+    // Full quadrature state transition table: [lastState][currentState] = direction
+    // +1 = CW step, -1 = CCW step, 0 = no valid transition or same state
+    static const int8_t transition_table[4][4] = {
+        //  00   01   10   11  <- current
+        {   0,  -1,   1,   0 }, // last = 00
+        {   1,   0,   0,  -1 }, // last = 01
+        {  -1,   0,   0,   1 }, // last = 10
+        {   0,   1,  -1,   0 }, // last = 11
+    };
 
-    if (currentTurnTime - lastTurnTime < ROTARY_DEBOUNCE_DELAY) return 0; // Debounce delay
-    lastTurnTime = currentTurnTime;
+    static int lastState = -1;
+    static int accumulator = 0;
 
-    static int lastEncoded = 0;
-    if (encoded != lastEncoded) {
-        if (encoded == 0b10 && lastEncoded == 0b11) {
-            lastEncoded = encoded;
-            return -1;  // CW
-        } else if (encoded == 0b01 && lastEncoded == 0b11) {
-            lastEncoded = encoded;
-            return 1; // CCW
-        }
-        lastEncoded = encoded;
+    int clk = digitalRead(ROTARY_CLK);
+    int dt = digitalRead(ROTARY_DT);
+    int currentState = (clk << 1) | dt;
+
+    // Initialize on first call
+    if (lastState == -1) {
+        lastState = currentState;
+        return 0;
     }
-    return 0;  // No movement
+
+    if (currentState == lastState) return 0; // No change
+
+    int direction = transition_table[lastState][currentState];
+    lastState = currentState;
+
+    if (direction == 0) return 0; // Invalid transition (noise), ignore
+
+    accumulator += direction;
+
+    // Most mechanical encoders have 4 state changes per detent (click).
+    // Only report a step when a full detent is completed.
+    if (accumulator >= 4) {
+        accumulator = 0;
+        return 1;  // CW
+    } else if (accumulator <= -4) {
+        accumulator = 0;
+        return -1; // CCW
+    }
+
+    return 0; // Partial movement, not a full detent yet
 }
 
 // Detects rotary button press: 1 for short press, 2 for long press, 0 for no press
@@ -245,7 +271,7 @@ void trigger_io_event_no_param(unsigned char action, unsigned char deckNo){
 void* rotary_encoder_thread(void* arg) {
     while (true) {
         poll_rotary_encoder();
-        usleep(50000); // Sleep to reduce CPU usage, adjust as needed
+        usleep(5000); // Poll every 5ms (200Hz) - fast enough to catch all encoder transitions
     }
     return NULL;
 }
