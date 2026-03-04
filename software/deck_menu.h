@@ -7,6 +7,7 @@
 typedef enum {
     DECK_MENU_MAIN,
     DECK_MENU_LOAD_FILE,
+    DECK_MENU_CUE,
     DECK_MENU_SETTINGS,
     DECK_MENU_ADJUST_VOLUME,
     DECK_MENU_INFO,
@@ -26,6 +27,7 @@ typedef struct {
 // Main display and navigation functions
 void display_deck_menu(struct deck *d, int deck_no);
 void handle_deck_menu_navigation(struct deck *d, int deckno);
+void deck_menu_reset(void);
 
 // Menu navigation and display helpers
 void display_menu(MenuItem *menuItems, int menuSize, int selectedItem, const char *title);
@@ -33,6 +35,8 @@ void handle_menu_navigation(struct deck *d, int deckno, MenuItem *menuItems, int
 
 // Entry functions for sub-menus
 void enter_load_file_menu(struct deck *d, int deckno);
+void enter_cue_menu(struct deck *d, int deckno);
+void enter_record_menu(struct deck *d, int deckno);
 void enter_adjust_volume(struct deck *d, int deckno);
 void enter_settings_menu(struct deck *d, int deckno);
 void enter_deck_info_display(struct deck *d, int deckno);

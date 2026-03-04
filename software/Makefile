@@ -74,6 +74,7 @@ OBJS = controller.o \
 	info_menu.o \
 	lcd_menu.o \
 	shared_variables.o \
+	preset_menu.o \
 	xwax.o
 DEVICE_CPPFLAGS = -DWITH_ALSA
 DEVICE_LIBS = $(ALSA_LIBS)

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <wiringPi.h>
+#include <pthread.h>
 #include "lcd_menu.h"
 #include "deck.h"
 #include "main_menu.h"
@@ -23,6 +24,11 @@
 #define ENABLE 0x04
 #define LCD_LINE_1 0x80  // First line
 #define LCD_LINE_2 0xC0  // Second line
+
+#define BUTTON_SHORT 17  // GPIO pin for short press button
+#define BUTTON_LONG 27   // GPIO pin for long press button
+#define BUTTON_DEBOUNCE_MS 350  // Debounce time in milliseconds (covers release bounce)
+
 // Globals for I2C LCD and Rotary Encoder
 int lcdHandle;  // I2C LCD Handle
 static struct deck **decks;
@@ -33,11 +39,36 @@ MainMenuState mainMenuState = MENU_MAIN;
 static unsigned long lastButtonPressTime = 0;
 static bool longPressHandled = false;
 
+// Interrupt-driven button state
+static volatile bool btn_select_pending = false;
+static volatile unsigned long btn_select_time = 0;
+static volatile bool btn_back_pending = false;
+static volatile unsigned long btn_back_time = 0;
+
+// ISR callbacks: don't check digitalRead — by the time the wiringPi ISR thread
+// runs, the pin may have bounced back HIGH. Trust the falling edge + debounce timer.
+void button_select_isr(void) {
+    unsigned long now = millis();
+    if (now - btn_select_time > BUTTON_DEBOUNCE_MS) {
+        btn_select_time = now;
+        btn_select_pending = true;
+    }
+}
+
+void button_back_isr(void) {
+    unsigned long now = millis();
+    if (now - btn_back_time > BUTTON_DEBOUNCE_MS) {
+        btn_back_time = now;
+        btn_back_pending = true;
+    }
+}
+
 
 // Function Prototypes
 void lcd_byte(int bits, int mode);
 void lcd_init();
 void lcd_string(const char *message, int line);
+void encoder_isr(void);
 
 void lcd_byte(int bits, int mode) {
     char high_bits = mode | (bits & 0xF0) | LCD_BACKLIGHT;
@@ -98,7 +129,7 @@ void lcdClear(int handle) {
 }
 
 void lcdPuts(int handle, const char *string) {    
-    fprintf(stderr, "Printing: %s\n", string);
+    //fprintf(stderr, "Printing: %s\n", string);
     for (int i = 0; string[i] != '\0'; i++) {
         // fprintf(stderr, "Char: %c (%02X)\n", string[i], string[i]);
         lcd_byte(string[i], LCD_CHR);
@@ -160,6 +191,28 @@ void lcd_menu_init(struct deck *deck_array[], int count) {
     pinMode(ROTARY_DT, INPUT);
     pinMode(ROTARY_SW, INPUT);
     pullUpDnControl(ROTARY_SW, PUD_UP);
+
+    // Register interrupts on both encoder pins (fires on every edge)
+    if (wiringPiISR(ROTARY_CLK, INT_EDGE_BOTH, &encoder_isr) < 0) {
+        fprintf(stderr, "Unable to setup ISR for ROTARY_CLK\n");
+    }
+    if (wiringPiISR(ROTARY_DT, INT_EDGE_BOTH, &encoder_isr) < 0) {
+        fprintf(stderr, "Unable to setup ISR for ROTARY_DT\n");
+    }
+
+    pinMode(BUTTON_SHORT, INPUT);
+    pinMode(BUTTON_LONG, INPUT);
+    pullUpDnControl(BUTTON_SHORT, PUD_UP);
+    pullUpDnControl(BUTTON_LONG, PUD_UP);
+
+    // Register interrupts for dedicated buttons (fires on press = falling edge)
+    if (wiringPiISR(BUTTON_LONG, INT_EDGE_FALLING, &button_select_isr) < 0) {
+        fprintf(stderr, "Unable to setup ISR for select button\n");
+    }
+    if (wiringPiISR(BUTTON_SHORT, INT_EDGE_FALLING, &button_back_isr) < 0) {
+        fprintf(stderr, "Unable to setup ISR for back button\n");
+    }
+
     lcd_init();
     printf("LCD menu initialized.\n");
 
@@ -179,78 +232,103 @@ void poll_rotary_encoder() {
     }
 }
 
-// Detects rotary encoder movement, returns 1 for CW, -1 for CCW, 0 for no movement
-// Uses a full quadrature state table to track all 4 transitions per detent.
-// Accumulates sub-steps and only reports a move when a full detent (4 edges) is completed,
-// which provides reliable debouncing and avoids phantom steps from contact bounce.
-int rotary_encoder_moved() {
-    // Full quadrature state transition table: [lastState][currentState] = direction
-    // +1 = CW step, -1 = CCW step, 0 = no valid transition or same state
-    static const int8_t transition_table[4][4] = {
-        //  00   01   10   11  <- current
-        {   0,  -1,   1,   0 }, // last = 00
-        {   1,   0,   0,  -1 }, // last = 01
-        {  -1,   0,   0,   1 }, // last = 10
-        {   0,   1,  -1,   0 }, // last = 11
-    };
+// Interrupt-driven rotary encoder using detent-to-detent state machine.
+// A step is only reported when the encoder completes a full detent cycle:
+//   CW:  11 -> 01 -> 00 -> 10 -> 11
+//   CCW: 11 -> 10 -> 00 -> 01 -> 11
+// Bounce near a detent can't trigger false steps because we require passing
+// through state 00 (both pins LOW) before accepting a new detent arrival.
+static pthread_mutex_t enc_mutex = PTHREAD_MUTEX_INITIALIZER;
+static volatile int enc_last_state = -1;
+static volatile int enc_steps = 0;
+static volatile int enc_phase = 0;  // 0=at detent, 1=left detent, 2=passed through middle
+static volatile int enc_dir = 0;
 
-    static int lastState = -1;
-    static int accumulator = 0;
+// Called by wiringPi on any CLK or DT edge change
+void encoder_isr(void) {
+    pthread_mutex_lock(&enc_mutex);
 
     int clk = digitalRead(ROTARY_CLK);
     int dt = digitalRead(ROTARY_DT);
-    int currentState = (clk << 1) | dt;
+    int state = (clk << 1) | dt;
 
-    // Initialize on first call
-    if (lastState == -1) {
-        lastState = currentState;
-        return 0;
+    if (state == enc_last_state) {
+        pthread_mutex_unlock(&enc_mutex);
+        return;
     }
 
-    if (currentState == lastState) return 0; // No change
+    int prev = enc_last_state;
+    enc_last_state = state;
 
-    int direction = transition_table[lastState][currentState];
-    lastState = currentState;
-
-    if (direction == 0) return 0; // Invalid transition (noise), ignore
-
-    accumulator += direction;
-
-    // Most mechanical encoders have 4 state changes per detent (click).
-    // Only report a step when a full detent is completed.
-    if (accumulator >= 4) {
-        accumulator = 0;
-        return 1;  // CW
-    } else if (accumulator <= -4) {
-        accumulator = 0;
-        return -1; // CCW
+    // Wait for first detent (11) before tracking
+    if (prev < 0) {
+        pthread_mutex_unlock(&enc_mutex);
+        return;
     }
 
-    return 0; // Partial movement, not a full detent yet
+    if (state == 3) {
+        // Arrived at detent — report step only if we passed through middle
+        if (enc_phase == 2) {
+            enc_steps += enc_dir;
+        }
+        enc_phase = 0;
+        enc_dir = 0;
+    } else if (enc_phase == 0 && prev == 3) {
+        // Just left detent — record initial direction
+        if (state == 1) enc_dir = 1;        // 11->01 = CW
+        else if (state == 2) enc_dir = -1;  // 11->10 = CCW
+        enc_phase = 1;
+    } else if (enc_phase == 1 && state == 0) {
+        // Reached middle (00) — movement is committed
+        enc_phase = 2;
+    }
+
+    pthread_mutex_unlock(&enc_mutex);
 }
 
-// Detects rotary button press: 1 for short press, 2 for long press, 0 for no press
+// Returns encoder direction since last call: -1, 0, or 1.
+int rotary_encoder_moved() {
+    pthread_mutex_lock(&enc_mutex);
+    int steps = enc_steps;
+    enc_steps = 0;
+    pthread_mutex_unlock(&enc_mutex);
+    if (steps > 0) return 1;
+    if (steps < 0) return -1;
+    return 0;
+}
+
+// Detects button press: 1 for select, 2 for back, 0 for no press
+// Only checks the dedicated GPIO buttons (not the rotary encoder button, which is now the home button).
 int rotary_button_pressed() {
-    bool buttonState = digitalRead(ROTARY_SW) == LOW;
-    unsigned long currentPressTime = millis();
+    // Check interrupt-captured button presses (never missed, even during LCD writes)
+    if (btn_back_pending) {
+        btn_back_pending = false;
+        return 2;  // Back
+    }
+    if (btn_select_pending) {
+        btn_select_pending = false;
+        return 1;  // Select
+    }
 
-    if (buttonState) {
-        if (lastButtonPressTime == 0) lastButtonPressTime = currentPressTime;
+    return 0;
+}
 
-        if (currentPressTime - lastButtonPressTime >= LONG_PRESS_DELAY && !longPressHandled) {
-            longPressHandled = true;
-            return 2;  // Long press detected
-        }
+// Detects rotary encoder button press as a "home" button.
+// Returns true once per press (on release), with debouncing.
+bool home_button_pressed() {
+    bool state = digitalRead(ROTARY_SW) == LOW;
+    unsigned long now = millis();
+
+    if (state) {
+        if (lastButtonPressTime == 0) lastButtonPressTime = now;
     } else {
-        if (lastButtonPressTime > 0 && currentPressTime - lastButtonPressTime < LONG_PRESS_DELAY) {
+        if (lastButtonPressTime > 0) {
             lastButtonPressTime = 0;
             longPressHandled = false;
-            return 1;  // Short press detected
+            return true;
         }
-        lastButtonPressTime = 0;
-        longPressHandled = false;
     }
-    return 0;
+    return false;
 }
 void trigger_io_event(unsigned char action, unsigned char deckNo, unsigned char param) {
     struct mapping temp_map = {0}; // Temporary mapping structure

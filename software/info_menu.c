@@ -83,11 +83,11 @@ void display_info_menu_actions() {
     }
 }
 
-// Handle navigation within the Info menu
+// Handle navigation within the Info menu (legacy, used when Info was top-level)
 void handle_info_menu_navigation() {
     int encoder_movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
-            
+
     // Navigate options in the action selection menu
     if (infoMenuState == 0) {
         if (encoder_movement != 0) {
@@ -95,7 +95,7 @@ void handle_info_menu_navigation() {
             display_info_menu_actions();
             needsUpdate = true;
         }
-        
+
         if (button_press == 1) {  // Short press to select an option
             if (selectedInfoOption == 0) {
                 infoMenuState = 1;  // Enter CPU/Mem view
@@ -111,7 +111,7 @@ void handle_info_menu_navigation() {
     }
     // Display CPU/Mem continuously until button is pressed
     else if (infoMenuState == 1) {
-        display_cpu_mem_usage();       
+        display_cpu_mem_usage();
         usleep(100000);  // Delay 500ms for a smooth update rate
         if (button_press == 1) {  // Short press to return to actions
             infoMenuState = 0;
@@ -127,6 +127,56 @@ void handle_info_menu_navigation() {
             infoMenuState = 0;
             needsUpdate = true;
             display_info_menu_actions();
+        }
+    }
+}
+
+// Blocking info submenu (called from Config menu)
+void enter_info_submenu() {
+    int selected = 0;
+    int numOptions = 2;
+    bool active = true;
+    needsUpdate = true;
+
+    while (active) {
+        int movement = rotary_encoder_moved();
+        int button_press = rotary_button_pressed();
+
+        if (movement != 0) {
+            selected = (selected + movement + numOptions) % numOptions;
+            needsUpdate = true;
+        }
+
+        if (button_press == 1) {
+            // Show the selected info screen until any button press
+            bool viewing = true;
+            while (viewing) {
+                if (selected == 0) {
+                    display_cpu_mem_usage();
+                } else {
+                    display_version();
+                }
+                usleep(100000);
+                if (rotary_button_pressed() || rotary_encoder_moved()) {
+                    viewing = false;
+                }
+            }
+            needsUpdate = true;
+        } else if (button_press == 2) {
+            active = false;
+        }
+
+        if (needsUpdate) {
+            lcdClear(lcdHandle);
+            lcdPosition(lcdHandle, 0, 0);
+            lcdPuts(lcdHandle, "Info");
+            lcdPosition(lcdHandle, 0, 1);
+            if (selected == 0) {
+                lcdPuts(lcdHandle, "CPU/Mem");
+            } else {
+                lcdPuts(lcdHandle, "Version");
+            }
+            needsUpdate = false;
         }
     }
 }

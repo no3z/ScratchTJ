@@ -2,18 +2,22 @@
 #include "lcd_menu.h"
 #include "deck.h"
 #include "player.h"
+#include "cues.h"
+#include "alsa_mixer.h"
 #include <unistd.h>
 #include <string.h>
 #include "track.h"
 #include "recording.h"
 
-#define MAX_INPUT_SOURCES 10
+#define RECORD_CAPTURE_DEVICE "plughw:1,0"
+#define RECORD_MIXER_CARD "default"
 
-InputSource inputSources[MAX_INPUT_SOURCES];
-int inputSourceCount = 0;
 static int nextRecordingNumber = 0;
+static RecordingContext recordingContext;
 
-RecordingContext recordingContext;
+// Capture source enum from ALSA mixer (e.g., Mic, Line In, etc.)
+static MixerControl captureSourceControl;
+static bool captureSourceFound = false;
 
 bool jogPitchModeEnabled;
 // Externals
@@ -23,13 +27,20 @@ extern MainMenuState mainMenuState;
 // Menu and State Variables
 static DeckMenuState currentDeckMenuState = DECK_MENU_MAIN;
 static int selectedItem = 0;
+static int recordSelectedSource = 0;
+
+// Cue labels for the two CUE screen buttons
+#define CUE_LABEL_SEL 0
+#define CUE_LABEL_BCK 1
+#define CUE_LONG_PRESS_MS 1500
 
 // Main deck menu items
 static MenuItem mainDeckMenuItems[] = {
     {"1. Load File", enter_load_file_menu},
-    // {"2. Set Volume", enter_adjust_volume},
-    {"3. Settings", enter_settings_menu},
-    {"4. Info", enter_deck_info_display},
+    {"2. CUE", enter_cue_menu},
+    {"3. Record", enter_record_menu},
+    {"4. Settings", enter_settings_menu},
+    {"5. Info", enter_deck_info_display},
 };
 
 static int mainDeckMenuSize = sizeof(mainDeckMenuItems) / sizeof(MenuItem);
@@ -42,7 +53,6 @@ static MenuItem loadFileMenuItems[] = {
     {"4. Random File", action_random_file},
     {"5. Next Folder", action_next_folder},
     {"6. Previous Folder", action_prev_folder},
-    {"7. Record", action_record},
 };
 
 static int loadFileMenuSize = sizeof(loadFileMenuItems) / sizeof(MenuItem);
@@ -70,6 +80,9 @@ void display_deck_menu(struct deck *d, int deck_no) {
             case DECK_MENU_LOAD_FILE:
                 display_menu(loadFileMenuItems, loadFileMenuSize, selectedItem, "Load File");
                 break;
+            case DECK_MENU_CUE:
+                display_cue_screen(d, deck_no);
+                break;
             case DECK_MENU_SETTINGS:
                 display_menu(settingsMenuItems, settingsMenuSize, selectedItem, "Settings");
                 break;
@@ -80,7 +93,7 @@ void display_deck_menu(struct deck *d, int deck_no) {
                 display_deck_info(d, deck_no);
                 break;
             case DECK_MENU_RECORD_INPUT_SOURCE:
-                display_input_sources_menu(inputSources, inputSourceCount, selectedItem, "Select Input");
+                display_record_source_screen();
                 break;
             case DECK_MENU_RECORDING:
                 display_recording_status(d, deck_no);
@@ -92,6 +105,11 @@ void display_deck_menu(struct deck *d, int deck_no) {
     }
 }
 
+void deck_menu_reset(void) {
+    currentDeckMenuState = DECK_MENU_MAIN;
+    selectedItem = 0;
+}
+
 // Handle Deck Menu Navigation
 void handle_deck_menu_navigation(struct deck *d, int deckno) {
     switch (currentDeckMenuState) {
@@ -100,6 +118,9 @@ void handle_deck_menu_navigation(struct deck *d, int deckno) {
             break;
         case DECK_MENU_LOAD_FILE:
             handle_menu_navigation(d, deckno, loadFileMenuItems, loadFileMenuSize);
+            break;
+        case DECK_MENU_CUE:
+            handle_cue_navigation(d, deckno);
             break;
         case DECK_MENU_SETTINGS:
             handle_menu_navigation(d, deckno, settingsMenuItems, settingsMenuSize);
@@ -187,6 +208,131 @@ void enter_deck_info_display(struct deck *d, int deckno) {
     needsUpdate = true;
 }
 
+void enter_cue_menu(struct deck *d, int deckno) {
+    currentDeckMenuState = DECK_MENU_CUE;
+    needsUpdate = true;
+}
+
+static void format_cue_pos(char *buf, size_t len, double pos) {
+    if (pos == CUE_UNSET) {
+        snprintf(buf, len, "--:--.---");
+    } else {
+        int total_ms = (int)(pos * 1000);
+        int mins = total_ms / 60000;
+        int secs = (total_ms % 60000) / 1000;
+        int ms = total_ms % 1000;
+        snprintf(buf, len, "%d:%02d.%03d", mins, secs, ms);
+    }
+}
+
+void display_cue_screen(struct deck *d, int deck_no) {
+    double sel_pos = cues_get(&d->cues, CUE_LABEL_SEL);
+    double bck_pos = cues_get(&d->cues, CUE_LABEL_BCK);
+    char sel_str[12], bck_str[12];
+    format_cue_pos(sel_str, sizeof(sel_str), sel_pos);
+    format_cue_pos(bck_str, sizeof(bck_str), bck_pos);
+    lcdClear(lcdHandle);
+    lcdPosition(lcdHandle, 0, 0);
+    lcdPrintf(lcdHandle, "CUE1:%s", sel_str);
+    lcdPosition(lcdHandle, 0, 1);
+    lcdPrintf(lcdHandle, "CUE2:%s", bck_str);
+}
+
+// CUE-specific button handler with long press detection on both buttons.
+// Returns: 0=nothing, 1=sel short, 2=sel long, 3=bck short, 4=bck long, 5=exit
+static int cue_button_pressed() {
+    static unsigned long sel_press_start = 0;
+    static unsigned long bck_press_start = 0;
+    static bool sel_long_handled = false;
+    static bool bck_long_handled = false;
+    unsigned long now = millis();
+    // GPIO 27 = select button (BUTTON_LONG in code, but returns 1=select in menus)
+    bool sel_state = digitalRead(27) == LOW;
+    // GPIO 17 = back button (BUTTON_SHORT in code, but returns 2=back in menus)
+    bool bck_state = digitalRead(17) == LOW;
+
+    // Select button (GPIO 27) - long press detection
+    if (sel_state) {
+        if (sel_press_start == 0) sel_press_start = now;
+        if (now - sel_press_start >= CUE_LONG_PRESS_MS && !sel_long_handled) {
+            sel_long_handled = true;
+            return 2; // sel long press
+        }
+    } else {
+        if (sel_press_start > 0 && !sel_long_handled) {
+            sel_press_start = 0;
+            return 1; // sel short press (released before threshold)
+        }
+        sel_press_start = 0;
+        sel_long_handled = false;
+    }
+
+    // Back button (GPIO 17) - long press detection
+    if (bck_state) {
+        if (bck_press_start == 0) bck_press_start = now;
+        if (now - bck_press_start >= CUE_LONG_PRESS_MS && !bck_long_handled) {
+            bck_long_handled = true;
+            return 4; // bck long press
+        }
+    } else {
+        if (bck_press_start > 0 && !bck_long_handled) {
+            bck_press_start = 0;
+            return 3; // bck short press (released before threshold)
+        }
+        bck_press_start = 0;
+        bck_long_handled = false;
+    }
+
+    return 0;
+}
+
+// Each button has its own cue point.
+// Short press = go to that button's cue. Long press = set it.
+// Encoder turn or rotary button = exit.
+void handle_cue_navigation(struct deck *d, int deckno) {
+    int encoder_movement = rotary_encoder_moved();
+    int btn = cue_button_pressed();
+
+    if (encoder_movement != 0) {
+        currentDeckMenuState = DECK_MENU_MAIN;
+        selectedItem = 0;
+        needsUpdate = true;
+        return;
+    }
+
+    if (btn == 1) {
+        // SEL short press: go to SEL cue
+        double pos = cues_get(&d->cues, CUE_LABEL_SEL);
+        if (pos != CUE_UNSET) {
+            player_seek_to(&d->player, pos);
+            printf("Deck %d: Go to CUE1 at %.2f\n", deckno + 1, pos);
+        }
+        needsUpdate = true;
+    } else if (btn == 2) {
+        // SEL long press: set SEL cue
+        double pos = player_get_elapsed(&d->player);
+        cues_set(&d->cues, CUE_LABEL_SEL, pos);
+        cues_save_to_file(&d->cues, d->player.track->path);
+        printf("Deck %d: Set CUE1 at %.2f\n", deckno + 1, pos);
+        needsUpdate = true;
+    } else if (btn == 3) {
+        // BCK short press: go to BCK cue
+        double pos = cues_get(&d->cues, CUE_LABEL_BCK);
+        if (pos != CUE_UNSET) {
+            player_seek_to(&d->player, pos);
+            printf("Deck %d: Go to CUE2 at %.2f\n", deckno + 1, pos);
+        }
+        needsUpdate = true;
+    } else if (btn == 4) {
+        // BCK long press: set BCK cue
+        double pos = player_get_elapsed(&d->player);
+        cues_set(&d->cues, CUE_LABEL_BCK, pos);
+        cues_save_to_file(&d->cues, d->player.track->path);
+        printf("Deck %d: Set CUE2 at %.2f\n", deckno + 1, pos);
+        needsUpdate = true;
+    }
+}
+
 void adjust_volume(struct deck *d, int deckno) {
     int movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
@@ -253,66 +399,95 @@ void action_prev_folder(struct deck *d, int deckno) {
     currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
-void action_record(struct deck *d, int deckno) {
-    inputSourceCount = get_available_input_sources(inputSources, MAX_INPUT_SOURCES);
+// --- Record menu (top-level deck menu item) ---
+// Scans ALSA mixer for capture source enum (Mic, Line In, etc.),
+// sets capture volume to 80%, starts passthrough so you can hear the input.
 
-    if (inputSourceCount == 0) {
-        // Handle the case when no input sources are found
-        printf("No input sources available.\n");
-        currentDeckMenuState = DECK_MENU_LOAD_FILE; // Go back to Load File menu
+static void find_capture_source_enum(void) {
+    MixerControl controls[20];
+    int count = get_mixer_controls(RECORD_MIXER_CARD, controls, 20);
+    captureSourceFound = false;
+
+    for (int i = 0; i < count; i++) {
+        if (controls[i].isEnum) {
+            // Use the first enum control (typically "Capture Source" or "Input Source")
+            memcpy(&captureSourceControl, &controls[i], sizeof(MixerControl));
+            captureSourceFound = true;
+            printf("Found capture source enum: %s (%d items)\n",
+                   captureSourceControl.name, captureSourceControl.enumItemCount);
+            break;
+        }
+    }
+}
+
+static void set_capture_volume_80(void) {
+    MixerControl controls[20];
+    int count = get_mixer_controls(RECORD_MIXER_CARD, controls, 20);
+
+    for (int i = 0; i < count; i++) {
+        if (controls[i].isVolume) {
+            // Look for capture volume controls (names containing "Capture", "Mic", "Line", "Rec")
+            if (strstr(controls[i].name, "Capture") || strstr(controls[i].name, "Mic") ||
+                strstr(controls[i].name, "Rec") || strstr(controls[i].name, "Line")) {
+                long vol80 = controls[i].min + (long)((controls[i].max - controls[i].min) * 0.8);
+                set_mixer_control(RECORD_MIXER_CARD, controls[i].name, vol80);
+                printf("Set %s to 80%% (%ld)\n", controls[i].name, vol80);
+            }
+        }
+    }
+}
+
+void enter_record_menu(struct deck *d, int deckno) {
+    find_capture_source_enum();
+    if (!captureSourceFound) {
+        printf("No capture source enum found in mixer.\n");
+        currentDeckMenuState = DECK_MENU_MAIN;
         needsUpdate = true;
         return;
     }
-
-    // Enter the Recording Input Sources menu
+    recordSelectedSource = captureSourceControl.currentEnumIndex;
+    set_capture_volume_80();
     currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
-    selectedItem = 0;
     needsUpdate = true;
-}
-
-void action_select_input_source(struct deck *d, int deckno) {
-    // Get the selected input source
-    InputSource *selectedSource = &inputSources[selectedItem];
-
-    // Generate the filename
-    char filename[256];
-    snprintf(filename, sizeof(filename), "/tmp/rec%06d.raw", nextRecordingNumber++);
-    // Assuming nextRecordingNumber is a static variable or member variable
-
-    // Start recording with the selected input source
-    printf("Deck %d: Recording from %s (%s)...\n", deckno + 1, selectedSource->name, selectedSource->device);
-
-    if (start_recording( &recordingContext, selectedSource->device, filename) == 0) {
-        // Recording started successfully
-        needsUpdate = true;
-
-        // Enter the Recording state
-        currentDeckMenuState = DECK_MENU_RECORDING;
-        needsUpdate = true;
-    } else {
-        // Failed to start recording
-        printf("Failed to start recording.\n");
-        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE; // Return to input sources menu
-        needsUpdate = true;
-    }
+    start_passthrough(RECORD_CAPTURE_DEVICE);
 }
 
 void handle_record_input_sources_navigation(struct deck *d, int deckno) {
     int encoder_movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
 
-    if (encoder_movement != 0) {
-        selectedItem = (selectedItem + encoder_movement + inputSourceCount) % inputSourceCount;
+    if (encoder_movement != 0 && captureSourceFound) {
+        recordSelectedSource = (recordSelectedSource + encoder_movement +
+                                captureSourceControl.enumItemCount) %
+                               captureSourceControl.enumItemCount;
+        // Switch the mixer input source
+        set_mixer_control_enum(RECORD_MIXER_CARD, captureSourceControl.name, recordSelectedSource);
+        captureSourceControl.currentEnumIndex = recordSelectedSource;
         needsUpdate = true;
     }
 
-    if (button_press == 1) { // Short press to select an input source
-        action_select_input_source(d, deckno);
+    if (button_press == 1) {
+        // Select: stop passthrough, start recording
+        stop_passthrough();
+
+        char filename[256];
+        snprintf(filename, sizeof(filename), "/tmp/rec%06d.raw", nextRecordingNumber++);
+        printf("Deck %d: Recording from %s (source: %s)...\n", deckno + 1,
+               RECORD_CAPTURE_DEVICE, captureSourceControl.enumItems[recordSelectedSource]);
+
+        if (start_recording(&recordingContext, RECORD_CAPTURE_DEVICE, filename) == 0) {
+            currentDeckMenuState = DECK_MENU_RECORDING;
+        } else {
+            printf("Failed to start recording.\n");
+            start_passthrough(RECORD_CAPTURE_DEVICE);
+        }
         needsUpdate = true;
     }
 
-    if (button_press == 2) { // Long press to go back to Load File Menu
-        currentDeckMenuState = DECK_MENU_LOAD_FILE;
+    if (button_press == 2) {
+        // Back: stop passthrough, return to deck menu
+        stop_passthrough();
+        currentDeckMenuState = DECK_MENU_MAIN;
         selectedItem = 0;
         needsUpdate = true;
     }
@@ -321,16 +496,20 @@ void handle_record_input_sources_navigation(struct deck *d, int deckno) {
 void handle_recording_navigation(struct deck *d, int deckno) {
     int button_press = rotary_button_pressed();
 
-    if (button_press == 1) { // Short press to stop recording
+    if (button_press == 1) {
+        // Select: stop recording, return to deck menu
         printf("Deck %d: Stopping recording.\n", deckno + 1);
-        stop_recording(d,&recordingContext);
-        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE; // Return to input sources menu
-        needsUpdate = true;
-    } else if (button_press == 2) { // Long press to go back to Load File menu
-        stop_recording(d,&recordingContext);
-        currentDeckMenuState = DECK_MENU_LOAD_FILE;
+        stop_recording(d, &recordingContext);
+        currentDeckMenuState = DECK_MENU_MAIN;
         selectedItem = 0;
         needsUpdate = true;
+    } else if (button_press == 2) {
+        // Back: stop recording, go back to source browser to record again
+        printf("Deck %d: Stopping recording.\n", deckno + 1);
+        stop_recording(d, &recordingContext);
+        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
+        needsUpdate = true;
+        start_passthrough(RECORD_CAPTURE_DEVICE);
     }
 }
 
@@ -365,17 +544,25 @@ void display_deck_info(struct deck *d, int deckno) {
     lcdPrintf(lcdHandle, "%.2f/%.2f", player_get_position(&d->player), player_get_remain(&d->player));
 }
 
-void display_input_sources_menu(InputSource *sources, int sourceCount, int selectedItem, const char *title) {
+void display_record_source_screen(void) {
     lcdClear(lcdHandle);
     lcdPosition(lcdHandle, 0, 0);
-    lcdPrintf(lcdHandle, "%s", title);
+    lcdPuts(lcdHandle, "Record Source:");
     lcdPosition(lcdHandle, 0, 1);
-    lcdPrintf(lcdHandle, "%d. %s", selectedItem + 1, sources[selectedItem].name);
+    if (captureSourceFound && recordSelectedSource < captureSourceControl.enumItemCount) {
+        lcdPrintf(lcdHandle, "%s", captureSourceControl.enumItems[recordSelectedSource]);
+    } else {
+        lcdPuts(lcdHandle, "None");
+    }
 }
 
 void display_recording_status(struct deck *d, int deck_no) {
     lcdClear(lcdHandle);
     lcdPosition(lcdHandle, 0, 0);
-    lcdPrintf(lcdHandle, "Recording...");
-    // Optionally, display recording time or other info
+    lcdPuts(lcdHandle, "REC:");
+    if (captureSourceFound && recordSelectedSource < captureSourceControl.enumItemCount) {
+        lcdPrintf(lcdHandle, "%s", captureSourceControl.enumItems[recordSelectedSource]);
+    }
+    lcdPosition(lcdHandle, 0, 1);
+    lcdPuts(lcdHandle, "SEL=stop BCK=exit");
 }

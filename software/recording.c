@@ -88,6 +88,113 @@ int get_available_input_sources(InputSource *sources, int max_sources)
     return source_count;
 }
 
+/* --- Audio passthrough (monitor input while browsing sources) --- */
+
+static PassthroughContext passthrough_ctx;
+
+static int passthrough_configure_pcm(snd_pcm_t *pcm) {
+    snd_pcm_hw_params_t *hw;
+    snd_pcm_hw_params_alloca(&hw);
+    snd_pcm_hw_params_any(pcm, hw);
+    snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+    snd_pcm_hw_params_set_format(pcm, hw, SND_PCM_FORMAT_S16_LE);
+    unsigned int rate = 48000;
+    snd_pcm_hw_params_set_rate(pcm, hw, rate, 0);
+    snd_pcm_hw_params_set_channels(pcm, hw, 2);
+    return snd_pcm_hw_params(pcm, hw);
+}
+
+static void *passthrough_thread_func(void *arg) {
+    PassthroughContext *ctx = (PassthroughContext *)arg;
+    int16_t buffer[512 * 2]; /* 512 frames, stereo */
+
+    while (ctx->running) {
+        int r = snd_pcm_readi(ctx->capture_handle, buffer, 512);
+        if (r == -EPIPE) {
+            snd_pcm_prepare(ctx->capture_handle);
+            continue;
+        } else if (r < 0) {
+            break;
+        }
+
+        int w = snd_pcm_writei(ctx->playback_handle, buffer, r);
+        if (w == -EPIPE) {
+            snd_pcm_prepare(ctx->playback_handle);
+            snd_pcm_writei(ctx->playback_handle, buffer, r);
+        }
+    }
+    return NULL;
+}
+
+int start_passthrough(const char *input_device) {
+    stop_passthrough();
+
+    int err;
+    memset(&passthrough_ctx, 0, sizeof(passthrough_ctx));
+
+    err = snd_pcm_open(&passthrough_ctx.capture_handle, input_device,
+                        SND_PCM_STREAM_CAPTURE, 0);
+    if (err < 0) {
+        fprintf(stderr, "Passthrough: cannot open capture %s: %s\n",
+                input_device, snd_strerror(err));
+        return -1;
+    }
+
+    if (passthrough_configure_pcm(passthrough_ctx.capture_handle) < 0) {
+        fprintf(stderr, "Passthrough: cannot configure capture\n");
+        snd_pcm_close(passthrough_ctx.capture_handle);
+        passthrough_ctx.capture_handle = NULL;
+        return -1;
+    }
+
+    err = snd_pcm_open(&passthrough_ctx.playback_handle, "default",
+                        SND_PCM_STREAM_PLAYBACK, 0);
+    if (err < 0) {
+        fprintf(stderr, "Passthrough: cannot open playback: %s\n", snd_strerror(err));
+        snd_pcm_close(passthrough_ctx.capture_handle);
+        passthrough_ctx.capture_handle = NULL;
+        return -1;
+    }
+
+    if (passthrough_configure_pcm(passthrough_ctx.playback_handle) < 0) {
+        fprintf(stderr, "Passthrough: cannot configure playback\n");
+        snd_pcm_close(passthrough_ctx.capture_handle);
+        snd_pcm_close(passthrough_ctx.playback_handle);
+        passthrough_ctx.capture_handle = NULL;
+        passthrough_ctx.playback_handle = NULL;
+        return -1;
+    }
+
+    passthrough_ctx.running = 1;
+    if (pthread_create(&passthrough_ctx.thread, NULL,
+                       passthrough_thread_func, &passthrough_ctx) != 0) {
+        passthrough_ctx.running = 0;
+        snd_pcm_close(passthrough_ctx.capture_handle);
+        snd_pcm_close(passthrough_ctx.playback_handle);
+        passthrough_ctx.capture_handle = NULL;
+        passthrough_ctx.playback_handle = NULL;
+        return -1;
+    }
+
+    printf("Passthrough started on %s\n", input_device);
+    return 0;
+}
+
+void stop_passthrough(void) {
+    if (!passthrough_ctx.running) return;
+    passthrough_ctx.running = 0;
+    pthread_join(passthrough_ctx.thread, NULL);
+    if (passthrough_ctx.capture_handle) {
+        snd_pcm_close(passthrough_ctx.capture_handle);
+        passthrough_ctx.capture_handle = NULL;
+    }
+    if (passthrough_ctx.playback_handle) {
+        snd_pcm_close(passthrough_ctx.playback_handle);
+        passthrough_ctx.playback_handle = NULL;
+    }
+    printf("Passthrough stopped\n");
+}
+
 /* Recording thread function */
 void *recording_thread_func(void *arg)
 {

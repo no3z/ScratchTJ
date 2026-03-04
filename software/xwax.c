@@ -359,17 +359,17 @@ int main(int argc, char *argv[])
 	deck_load_folder(&deck[0], "/home/no3z/beats");
 	deck_load_folder(&deck[1], "/home/no3z/samples");	
 
-	float input_curveFactor = 0.1f;
-	float input_curvePower = 0.2f;
+	float input_curveFactor = 0.1f;  // Sharp cut at fader edges (SC1000 uses binary cut)
+	float input_curvePower = 0.2f;   // Sharp curve exponent
 	float input_curveSwitch = 1.0f;
-	float slippiness = 200.f;
-	float brakespeed = 3000.f;
-	float platterspeed = 1800.0f; // 2400 CPR * 0.75 rev/sec (45RPM). For 33RPM use ~1320
-	float target_pitch = 15.0f; //10 for a 1024 buffer size
-	float blipthreshold = 250.0f; // Max angle change per frame before filtering (encoder glitch rejection, scaled for 2400 CPR)
-	float pitch_filter = 0.1f; // Pitch low-pass filter alpha (0.0=very smooth/laggy, 1.0=instant/noisy)
-	float cap_threshold = 5000.0f; // Capacitive touch activation threshold
-	float cap_hysteresis = 500.0f; // Hysteresis band (+/- around threshold to prevent flicker)
+	float slippiness = 200.f;        // SC1000 default: 200
+	float brakespeed = 3000.f;       // SC1000 default: 3000
+	float platterspeed = 1333.0f;    // SC1000: 2275 @ 4096 CPR → 1333 @ 2400 CPR (33RPM equivalent)
+	float target_pitch = 15.0f;      // Proportional gain (lower = smoother, higher = tighter but can wobble)
+	float blipthreshold = 59.0f;     // SC1000: 100 @ 4096 CPR → 59 @ 2400 CPR (same angular tolerance)
+	float pitch_filter = 0.2f;       // Pitch low-pass filter alpha (balance between responsiveness and stability)
+	float cap_threshold = 5000.0f;   // Capacitive touch activation threshold (hardware-dependent)
+	float cap_hysteresis = 500.0f;   // Hysteresis band around threshold
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);

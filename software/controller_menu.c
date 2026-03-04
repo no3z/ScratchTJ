@@ -5,6 +5,8 @@
 #include "sc_input.h"
 #include "xwax.h"
 #include "shared_variables.h"
+#include "info_menu.h"
+#include "preset_menu.h"
 
 // Constants
 #define MAX_MIXER_CONTROLS 20
@@ -21,7 +23,9 @@ static int mixerControlCount = 0;
 // Controller menu options
 const char *controllerOptions[] = {
     "Sound Settings",
-    "Global Settings"
+    "Global Settings",
+    "Info",
+    "Presets"
 };
 
 // Function Prototypes
@@ -29,7 +33,7 @@ void adjust_mixer_control(int selectedIndex);
 void adjust_variable_value(EditableVariable *variable);
 
 // Display Controller Menu
-void display_controller_menu(struct deck *d, int deck_no) {
+void display_controller_menu(struct deck *decks[], int deck_count) {
     lcdClear(lcdHandle);
     lcdPosition(lcdHandle, 0, 0);
     lcdPuts(lcdHandle, "Config");
@@ -40,7 +44,7 @@ void display_controller_menu(struct deck *d, int deck_no) {
 }
 
 // Handle Controller Menu Navigation
-void handle_controller_menu_navigation(struct deck *d, int deckno) {
+void handle_controller_menu_navigation(struct deck *decks[], int deck_count) {
     int encoder_movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
 
@@ -54,10 +58,18 @@ void handle_controller_menu_navigation(struct deck *d, int deckno) {
     if (button_press == 1) { // Short press to select
         switch (selectedOption) {
             case CONTROLLER_SOUND_SETTINGS:
-                enter_sound_settings_menu(d, deckno);
+                enter_sound_settings_menu(decks[0], 0);
                 break;
             case CONTROLLER_GLOBAL_SETTINGS:
-                enter_global_settings_menu(d, deckno);
+                enter_global_settings_menu(decks[0], 0);
+                break;
+            case CONTROLLER_INFO:
+                enter_info_submenu();
+                break;
+            case CONTROLLER_PRESETS:
+                enter_preset_submenu(decks);
+                break;
+            default:
                 break;
         }
         needsUpdate = true;

@@ -408,7 +408,7 @@ void process_io()
 			{
 				if (pinVal)
 				{
-					printf("Button %d pressed\n", last_map->Pin);
+					//printf("Button %d pressed\n", last_map->Pin);
 					if (firstTimeRound && last_map->DeckNo == 1 && (last_map->Action == ACTION_VOLUP || last_map->Action == ACTION_VOLDOWN))
 					{
 						player_set_track(&deck[0].player, track_acquire_by_import(deck[0].importer, "/var/os-version.mp3"));
@@ -438,7 +438,7 @@ void process_io()
 				// check to see if unpressed
 				if (!pinVal)
 				{
-					printf("Button %d released\n", last_map->Pin);
+					//printf("Button %d released\n", last_map->Pin);
 					if (last_map->Edge == 0)
 						IOevent(last_map, NULL);
 					// start the counter
@@ -451,7 +451,7 @@ void process_io()
 			// Button has been held for a while
 			else if (last_map->debounce == scsettings.holdtime)
 			{
-				printf("Button %d-%d held\n", last_map->port, last_map->Pin);
+				//printf("Button %d-%d held\n", last_map->port, last_map->Pin);
 				if ((!shifted && last_map->Edge == 2) || (shifted && last_map->Edge == 4))
 					IOevent(last_map, NULL);
 				last_map->debounce++;
@@ -472,7 +472,7 @@ void process_io()
 				// check to see if unpressed
 				else
 				{
-					printf("Button %d released\n", last_map->Pin);
+					//printf("Button %d released\n", last_map->Pin);
 					if (last_map->Edge == 0)
 						IOevent(last_map, NULL);
 					// start the counter
@@ -545,6 +545,12 @@ static inline float fast_get(float *cached) {
 	return *cached;
 }
 
+// --- Binary protocol read buffer (declared early for watchdog access) ---
+#define BUFFER_SIZE 256
+unsigned char read_buffer[BUFFER_SIZE];
+static int buf_pos = 0;
+static int buf_len = 0;
+
 // --- Serial handshake and watchdog ---
 static bool serial_connected = false;
 static struct timespec last_packet_time;
@@ -573,6 +579,21 @@ bool serial_handshake() {
 	return false;
 }
 
+static int watchdog_failures = 0;
+
+void reset_arduino_dtr() {
+	printf("Serial watchdog: resetting Arduino via DTR...\n");
+	int modem_bits;
+	ioctl(serial_fd, TIOCMGET, &modem_bits);
+	modem_bits &= ~TIOCM_DTR;  // DTR LOW = assert reset
+	ioctl(serial_fd, TIOCMSET, &modem_bits);
+	usleep(100000);  // 100ms reset pulse
+	modem_bits |= TIOCM_DTR;   // DTR HIGH = release reset
+	ioctl(serial_fd, TIOCMSET, &modem_bits);
+	usleep(2000000);  // Wait 2s for bootloader + sketch start
+	tcflush(serial_fd, TCIOFLUSH);
+}
+
 void check_serial_watchdog() {
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
@@ -583,18 +604,25 @@ void check_serial_watchdog() {
 			printf("Serial watchdog: no data for %.1fs, reconnecting...\n", elapsed);
 			serial_connected = false;
 		}
-		// Flush buffers and retry handshake
+		watchdog_failures++;
+
+		// Clear stale application buffer
+		buf_pos = 0;
+		buf_len = 0;
+
+		// After 3 consecutive failures, hard-reset the Arduino via DTR
+		if (watchdog_failures >= 3) {
+			reset_arduino_dtr();
+			watchdog_failures = 0;
+		}
+
+		// Flush kernel buffers and retry handshake
 		tcflush(serial_fd, TCIOFLUSH);
 		serial_handshake();
 	}
 }
 
 // --- Binary protocol packet reader ---
-#define BUFFER_SIZE 256
-unsigned char read_buffer[BUFFER_SIZE];
-static int buf_pos = 0;
-static int buf_len = 0;
-
 // Position interpolation state
 static struct timespec last_encoder_time;
 static int last_raw_encoder = 0;
@@ -638,6 +666,7 @@ void read_serial_data() {
 		// Update watchdog timestamp
 		clock_gettime(CLOCK_MONOTONIC, &last_packet_time);
 		serial_connected = true;
+		watchdog_failures = 0;
 
 		// Apply fader switch
 		bool switchFader = false;
@@ -723,12 +752,12 @@ void process_pic()
     get_variable_value("Fad Power", &curvePower);
 
     if (fader <= 0.5) {
-        // Left side: Deck 0 stays at full volume, Deck 1 fades in
+        // Left side: Deck 1 stays at full volume, Deck 0 fades in from border
         deck[1].player.faderTarget = 1.0;
-        deck[0].player.faderTarget = pow(fader / curveFactor, curvePower); // Use curveFactor to shift the transition
+        deck[0].player.faderTarget = pow(fader / curveFactor, curvePower);
     } else {
-        // Right side: Deck 1 stays at full volume, Deck 0 fades in
-        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower); // Use curveFactor to shift the transition
+        // Right side: Deck 0 stays at full volume, Deck 1 fades in from border
+        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower);
         deck[0].player.faderTarget = 1.0;
     }
 

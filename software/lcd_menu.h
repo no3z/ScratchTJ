@@ -18,8 +18,7 @@ typedef enum {
     MENU_MAIN,
     MENU_DECK1,
     MENU_DECK2,
-    MENU_CONTROLLER,
-    MENU_INFO
+    MENU_CONTROLLER
 } MainMenuState;
 
 
@@ -32,6 +31,7 @@ extern MainMenuState mainMenuState;
 void lcd_menu_init(struct deck *decks[], int deck_count);
 int rotary_encoder_moved();
 int rotary_button_pressed();
+bool home_button_pressed();
 void poll_rotary_encoder(void);
 
 

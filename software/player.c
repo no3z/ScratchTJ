@@ -532,13 +532,17 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		if (pl->pitch < -20.0) pl->pitch = -20.0;
 
 		float slippiness = pfast_get(cached_slippiness, 200.0f);
-		// Simulate slipmat for lasers/phasers
-		if (pl->pitch < pl->motor_speed - 0.1)
+		// Simulate slipmat: ramp toward motor_speed, clamped to prevent overshoot
+		// (with large buffers, samples/slippiness can exceed the deadband and cause wobble)
+		if (pl->pitch < pl->motor_speed - 0.1) {
 			target_pitch = pl->pitch + (double)samples / slippiness;
-		else if (pl->pitch > pl->motor_speed + 0.1)
+			if (target_pitch > pl->motor_speed) target_pitch = pl->motor_speed;
+		} else if (pl->pitch > pl->motor_speed + 0.1) {
 			target_pitch = pl->pitch - (double)samples / slippiness;
-		else
+			if (target_pitch < pl->motor_speed) target_pitch = pl->motor_speed;
+		} else {
 			target_pitch = pl->motor_speed;
+		}
 	}
 	else
 	{
@@ -558,9 +562,17 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-	// Pitch low-pass filter: alpha controls responsiveness vs smoothness
-	// Configurable via "pitch_filter" shared variable (Config Menu → Global Settings)
-	float pitch_alpha = pfast_get(cached_pitch_filter, 0.1f);
+	// Pitch low-pass filter with separate alphas:
+	// - Scratching (platter touched): use configurable pitch_filter for responsiveness
+	// - Released (slipmat active): use 0.1 to match SC1000 convergence rate
+	//   (SC1000: 0.1 alpha @ 256 buf = 24 pitch/sec; here: 0.1 @ 1024 buf = 24 pitch/sec)
+	bool platterReleased = (pl->justPlay == 1 || (pl->capTouch == 0 && pl->oldCapTouch == 0));
+	float pitch_alpha;
+	if (platterReleased) {
+		pitch_alpha = 0.1f;
+	} else {
+		pitch_alpha = pfast_get(cached_pitch_filter, 0.2f);
+	}
 	filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
 	amountToDecay = (DECAYSAMPLES) / (double)samples;
