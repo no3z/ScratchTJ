@@ -12,7 +12,7 @@ CapacitiveSensor capSensor = CapacitiveSensor(sendPin, sensePin);
 volatile long encoderValue = 0; // Use long to handle large counts
 volatile byte lastEncoded = 0;
 
-const int CPR = 2400; // Counts Per Revolution from datasheet
+const int CPR = 4096; // Counts Per Revolution (1024 PPR encoder with 4x quadrature decoding)
 
 void setup() {
   pinMode(encoderPinA, INPUT_PULLUP); // Use internal pull-up resistors
@@ -44,10 +44,8 @@ void loop() {
     interrupts();
 
     // Map encoderValue to 0 - 4095 range
-    // Use floating-point rounding to avoid non-uniform step sizes caused by
-    // integer truncation when CPR (2400) doesn't divide evenly into 4096.
-    // Without this, each encoder tick alternates between +1 and +2 mapped units,
-    // which creates pitch wobble (wurbly scratching sound) in the audio engine.
+    // With CPR=4096 this is a 1:1 identity mapping (no rounding errors).
+    // The round() is kept as a safety net in case CPR is changed to a non-4096 value.
     long normalised = ((currentEncoderValue % CPR) + CPR) % CPR;
     int mapped_angle = (int)round((double)normalised * 4096.0 / CPR);
     if (mapped_angle >= 4096) mapped_angle = 0; // Clamp wrap-around

@@ -624,13 +624,10 @@ void process_rot()
 
 	// rotary sensor sometimes returns incorrect values, if we skip more than threshold ignore that value
 	// If we see 3 blips in a row, then I guess we better accept the new value
-	// NOTE: Threshold raised from 100 to 400 for rotary encoder compatibility.
-	// With a 2400 CPR encoder mapped to 4096 and a 10ms send interval, scratching
-	// above ~2.4 rev/sec exceeds 100 steps per frame, causing valid fast movements
-	// to be silently dropped (every 3rd reading accepted, rest discarded).
-	// 400 allows up to ~6 rev/sec before the filter kicks in, which covers
-	// normal DJ scratching range without letting through genuine glitch values.
-	if (abs(deck[1].newEncoderAngle - wrappedAngle) > 400 && numBlips < 2)
+	// Threshold is configurable via the "blipthreshold" shared variable (Config Menu → Global Settings)
+	float blipthreshold;
+	get_variable_value("blipthreshold", &blipthreshold);
+	if (abs(deck[1].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
 	{
 		numBlips++;
 	}

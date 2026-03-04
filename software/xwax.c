@@ -366,6 +366,8 @@ int main(int argc, char *argv[])
 	float brakespeed = 3000.f;
 	float platterspeed = 3072.0f;
 	float target_pitch = 15.0f; //10 for a 1024 buffer size
+	float blipthreshold = 400.0f; // Max angle change per frame before filtering (encoder glitch rejection)
+	float pitch_filter = 0.1f; // Pitch low-pass filter alpha (0.0=very smooth/laggy, 1.0=instant/noisy)
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
@@ -373,6 +375,8 @@ int main(int argc, char *argv[])
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
     register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
 	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
+	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
+	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
 	
 
 	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));

@@ -532,7 +532,11 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-	filtered_pitch = (0.1 * target_pitch) + (0.9 * pl->pitch);
+	// Pitch low-pass filter: alpha controls responsiveness vs smoothness
+	// Configurable via "pitch_filter" shared variable (Config Menu → Global Settings)
+	float pitch_alpha;
+	get_variable_value("pitch_filter", &pitch_alpha);
+	filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
 	amountToDecay = (DECAYSAMPLES) / (double)samples;
 
