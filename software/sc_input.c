@@ -622,9 +622,15 @@ void process_rot()
 		wrappedAngle = deck[1].encoderAngle;
 	}
 
-	// rotary sensor sometimes returns incorrect values, if we skip more than 100 ignore that value
+	// rotary sensor sometimes returns incorrect values, if we skip more than threshold ignore that value
 	// If we see 3 blips in a row, then I guess we better accept the new value
-	if (abs(deck[1].newEncoderAngle - wrappedAngle) > 100 && numBlips < 2)
+	// NOTE: Threshold raised from 100 to 400 for rotary encoder compatibility.
+	// With a 2400 CPR encoder mapped to 4096 and a 10ms send interval, scratching
+	// above ~2.4 rev/sec exceeds 100 steps per frame, causing valid fast movements
+	// to be silently dropped (every 3rd reading accepted, rest discarded).
+	// 400 allows up to ~6 rev/sec before the filter kicks in, which covers
+	// normal DJ scratching range without letting through genuine glitch values.
+	if (abs(deck[1].newEncoderAngle - wrappedAngle) > 400 && numBlips < 2)
 	{
 		numBlips++;
 	}

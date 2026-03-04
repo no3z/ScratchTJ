@@ -28,7 +28,7 @@ void setup() {
 }
 
 unsigned long previousMillis = 0;
-const unsigned long interval = 10; // Adjust the interval as needed
+const unsigned long interval = 5; // Reduced from 10ms to 5ms for smoother position updates (200Hz vs 100Hz)
 
 void loop() {
   unsigned long currentMillis = millis();
@@ -44,8 +44,13 @@ void loop() {
     interrupts();
 
     // Map encoderValue to 0 - 4095 range
-    int mapped_angle = (currentEncoderValue % CPR) * 4096 / CPR;
-    if (mapped_angle < 0) mapped_angle += 4096; // Ensure positive value
+    // Use floating-point rounding to avoid non-uniform step sizes caused by
+    // integer truncation when CPR (2400) doesn't divide evenly into 4096.
+    // Without this, each encoder tick alternates between +1 and +2 mapped units,
+    // which creates pitch wobble (wurbly scratching sound) in the audio engine.
+    long normalised = ((currentEncoderValue % CPR) + CPR) % CPR;
+    int mapped_angle = (int)round((double)normalised * 4096.0 / CPR);
+    if (mapped_angle >= 4096) mapped_angle = 0; // Clamp wrap-around
 
     // Read capacitive sensor value
     long capacitiveValue = capSensor.capacitiveSensor(30); // Adjust sample size (30)
