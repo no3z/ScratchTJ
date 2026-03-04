@@ -12,7 +12,13 @@ ScratchTJ is a portable digital turntable you can use to scratch sounds like a D
 
 Here's what it looks like when it's done:
 
-![Assembled Front View](assembled_front_view.jpg)
+![Assembled Front View — the finished ScratchTJ with HDD platter, LCD, fader, and 3D-printed enclosure](assembled_front_view.jpg)
+
+![Assembled Back View — audio jacks, USB, and power connections](assembled_back_view.jpg)
+
+The project was inspired by the **SC500/SC1000** portable turntable by the_rasteri:
+
+![The original SC500 — the inspiration for ScratchTJ](sc500_original_reference.jpg)
 
 **How it works in a nutshell:**
 
@@ -108,6 +114,8 @@ The Arduino Nano is responsible for reading three sensors and sending the data t
 
 This is the big encoder that goes under the platter. It has two output channels (A and B) that produce square wave signals as it spins. Because we read both channels on both rising and falling edges (called **4x quadrature decoding**), a 600 PPR encoder gives us **2400 counts per revolution** — that's incredibly precise.
 
+![The 600 PPR magnetoelectric rotary encoder — note the VCC, A, GND, B wire labels](600ppr_encoder_closeup.jpg)
+
 **Wiring:**
 
 ```
@@ -126,6 +134,8 @@ This is the big encoder that goes under the platter. It has two output channels 
 ### 2.2 — The DJ Crossfader
 
 The fader is a simple potentiometer (variable resistor). It outputs a voltage between 0V and 5V depending on its position.
+
+![DJ crossfader — a standard Pioneer-style 60mm linear fader](dj_fader_closeup.jpg)
 
 **Wiring:**
 
@@ -183,6 +193,8 @@ Here's what's happening electrically:
 > **The trick:** You need a thin wire (like 1.5mm copper wire) that runs through a channel in the encoder shaft adapter, making electrical contact with the spinning HDD platter. The 3D-printed HDD adapter has channels for this wire. When the platter spins, the wire maintains contact with the platter surface.
 
 > **The 1200Ω resistor:** This value is tuned for this specific setup. A larger resistor makes the sensor more sensitive but slower. 1200Ω gives a good balance between sensitivity and speed for DJ scratching.
+
+![The 1.2kΩ resistor and the thin copper wire that contacts the HDD platter](capacitive_resistor_closeup.jpg)
 
 **How the readings work:**
 
@@ -272,6 +284,10 @@ The Pi communicates with the Arduino over its hardware serial port (`/dev/serial
 4. Say **Yes** to "serial port hardware enabled"
 5. Reboot
 
+Here's what the prototyping stage looks like with everything on a breadboard — Arduino, Pi, AudioInjector, LCD, encoder, and fader all wired up for testing:
+
+![Breadboard prototyping — all components connected for testing before going into the enclosure](breadboard_prototyping.jpg)
+
 ### 3.4 — Connect the Arduino to the Pi (Serial)
 
 ```
@@ -298,6 +314,8 @@ LCD I2C Backpack         Raspberry Pi
   SDA          ──────────►  GPIO 2 (SDA, Pin 3)
   SCL          ──────────►  GPIO 3 (SCL, Pin 5)
 ```
+
+![LCD display and menu rotary encoder wired on a breadboard with the Arduino Nano](lcd_encoder_breadboard.jpg)
 
 Enable I2C on the Pi:
 1. `sudo raspi-config` → **Interface Options > I2C** → Enable
@@ -392,6 +410,10 @@ This adapter connects the HDD platter to the encoder shaft. The key feature is a
 
 Houses the Raspberry Pi, Arduino, fader, LCD, and encoder. The platter encoder mounts underneath with the shaft poking through the top.
 
+![Side view of the enclosure — you can see the platter, the wiring underneath, and the rotary encoder knob](enclosure_side_view.jpg)
+
+![Top-down view — CD disc used as platter, LCD display, fader slot, and encoder knob all visible](assembled_top_view.jpg)
+
 ### 5.3 — Button Extender
 
 **[Download from Tinkercad](https://www.tinkercad.com/things/4uivv2bXmRU-button-extender-scratch)**
@@ -449,6 +471,8 @@ cd ~/ScratchTJ/software
 ```
 
 The LCD should light up and show the main menu. You can now browse and load tracks on each deck.
+
+![Full workbench setup during development — monitor, laptop, AudioInjector, and breadboard prototype](workbench_overview.jpg)
 
 ---
 
@@ -521,24 +545,6 @@ Found settings you like? Go to **Config > Presets** to save them into one of 5 p
 ### "The fader direction is backwards"
 - Change the `Fad Switch` parameter to 1 (or 0) in Config > Global Settings
 - Or swap the left/right wires on the fader
-
----
-
-## Build Photos
-
-Here are some photos from the build process to help you visualize the assembly:
-
-![LCD and Encoder on Breadboard](lcd_encoder_breadboard.jpg)
-
-![Enclosure Side View](enclosure_side_view.jpg)
-
-![Assembled Top View](assembled_top_view.jpg)
-
-![600 PPR Rotary Encoder](600ppr_encoder_closeup.jpg)
-
-![Capacitive Sensing Resistor](capacitive_resistor_closeup.jpg)
-
-![Workbench Overview](workbench_overview.jpg)
 
 ---
 
