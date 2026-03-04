@@ -194,7 +194,9 @@ Here's what's happening electrically:
 
 > **The 1200Ω resistor:** This value is tuned for this specific setup. A larger resistor makes the sensor more sensitive but slower. 1200Ω gives a good balance between sensitivity and speed for DJ scratching.
 
-![The 1.2kΩ resistor and the thin copper wire that contacts the HDD platter](capacitive_resistor_closeup.jpg)
+![Side view of the enclosure — you can see the platter, the wiring underneath, and the rotary encoder knob](enclosure_side_view.jpg)
+
+![Top-down view — CD disc used as platter, LCD display, fader slot, and encoder knob all visible](assembled_top_view.jpg)
 
 **How the readings work:**
 
@@ -409,10 +411,6 @@ This adapter connects the HDD platter to the encoder shaft. The key feature is a
 **[Download from Tinkercad](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0.1?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y)**
 
 Houses the Raspberry Pi, Arduino, fader, LCD, and encoder. The platter encoder mounts underneath with the shaft poking through the top.
-
-![Side view of the enclosure — you can see the platter, the wiring underneath, and the rotary encoder knob](enclosure_side_view.jpg)
-
-![Top-down view — CD disc used as platter, LCD display, fader slot, and encoder knob all visible](assembled_top_view.jpg)
 
 ### 5.3 — Button Extender
 
