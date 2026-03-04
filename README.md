@@ -13,12 +13,12 @@ A fully open-source portable scratch instrument built around a Raspberry Pi, Ard
 - Two independent decks: beats + scratch sample, mixed through a DJ fader
 - 600 PPR rotary encoder platter with capacitive touch via HDD platter
 - 1602A LCD display with rotary encoder for menu navigation
-- Two dedicated navigation buttons (Enter / Back) on GPIO 17 and 27
+- Two dedicated navigation buttons (Enter / Back) on GPIO 17 and 27 with cue point control
+- Live input recording from the sound card with source selection
 - 5-slot preset system to save and load all settings
 - Binary serial protocol at 500 kbaud between Arduino and Pi
 - All key parameters tunable in real time from the LCD config menu
-- ALSA mixer control and recording from the sound card inputs
-- MIDI input support for external controllers
+- ALSA mixer control for input/output levels
 - Pitch mode via rotary encoder long press
 
 ## Architecture
@@ -29,11 +29,11 @@ A fully open-source portable scratch instrument built around a Raspberry Pi, Ard
 |              |   8-byte binary pkt |              |              | Sound Card      |
 | - Encoder    |   (sync+data+XOR)   | - xwax       |              +-----------------+
 | - Fader      |                     | - LCD menu   |
-| - Cap sensor |                     | - MIDI       |
+| - Cap sensor |                     | - Recording  |
 +--------------+                     +--------------+
 ```
 
-The Arduino reads the 600 PPR rotary encoder (2400 CPR with 4x quadrature decoding), the DJ crossfader, and the capacitive touch sensor at 200 Hz. Data is sent as 8-byte binary packets with XOR checksum. The Raspberry Pi runs the audio engine, LCD menu system, and MIDI processing.
+The Arduino reads the 600 PPR rotary encoder (2400 CPR with 4x quadrature decoding), the DJ crossfader, and the capacitive touch sensor at 200 Hz. Data is sent as 8-byte binary packets with XOR checksum. The Raspberry Pi runs the audio engine, LCD menu system, and live recording.
 
 ## Bill of Materials
 
@@ -81,7 +81,10 @@ The software is a fork of the [SC1000 codebase](https://github.com/rasteri/SC100
 | `software/sc_input.c` | Serial reader, encoder processing, platter-to-audio position mapping |
 | `software/player.c` | Audio engine with cubic interpolation, pitch filtering, slipmat simulation |
 | `software/xwax.c` | Main application, deck init, shared variable registration |
+| `software/recording.c` | Live input recording from ALSA capture devices |
+| `software/cues.c` | Cue point system with per-track save/load |
 | `software/lcd_menu.c` | LCD display, rotary encoder menu navigation, 2-button support |
+| `software/deck_menu.c` | Per-deck menu: file browse, transport, cue screen, recording |
 | `software/controller_menu.c` | Config menu: Sound Settings, Global Settings, Info, Presets |
 | `software/preset_menu.c` | 5-slot preset save/load/reset system |
 | `software/shared_variables.c` | Thread-safe runtime variable system for LCD-tunable parameters |
@@ -91,8 +94,8 @@ The software is a fork of the [SC1000 codebase](https://github.com/rasteri/SC100
 
 ```
 Main Menu
-|-- Deck 0 (Beats) -- file browse, transport, volume, cue points
-|-- Deck 1 (Samples) -- file browse, transport, volume, cue points
+|-- Deck 0 (Beats) -- file browse, transport, volume, cue points, recording
+|-- Deck 1 (Samples) -- file browse, transport, volume, cue points, recording
 +-- Config
     |-- Sound Settings -- ALSA mixer controls
     |-- Global Settings -- all runtime-tunable parameters (see below)
@@ -101,6 +104,19 @@ Main Menu
 ```
 
 Navigation: rotary encoder scrolls, **Enter** button (GPIO 17) selects, **Back** button (GPIO 27) returns. Long-pressing the rotary encoder enters **Pitch Mode** for adjusting deck playback speed.
+
+### Two-Button Cue System
+
+Each deck has a **CUE** screen where the two physical buttons (Enter / Back) act as independent cue point triggers:
+
+- **Short press** = jump to that button's saved cue point
+- **Long press** = set the cue point at the current playback position
+
+Cue positions are saved per track and persist between sessions. This gives you instant access to two hot cues per deck while scratching, without needing to navigate the menu.
+
+### Live Input Recording
+
+The deck menu includes a **Record** option that lets you capture audio directly from the sound card inputs. You can select the input source from a list of available ALSA capture devices, start/stop recording, and the resulting WAV file is automatically loaded into the deck for immediate playback and scratching.
 
 ### Runtime-Tunable Parameters
 
