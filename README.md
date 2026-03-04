@@ -60,18 +60,18 @@ All parts were designed in Tinkercad and can be printed on a standard FDM printe
 - **Enclosure**: [Tinkercad Model](https://www.tinkercad.com/things/2LCXX7xvP9b-tinkerscratchv0.1?sharecode=RHVKMN4xlvb5UvUtA5s9apYJHQghMAneHwZlXMxaT3Y) - Houses all components.
 - **Buttons Extender**: [Tinkercad Model](https://www.tinkercad.com/things/4uivv2bXmRU-button-extender-scratch) - Add-on structure for the two navigation buttons.
 
-![2 Buttons Add-on](https://github.com/no3z/ScratchTJ/raw/main/docs/2buttons.png)
+![Button Extender 3D Model](https://github.com/no3z/ScratchTJ/raw/main/docs/button_extender_3d_model.png)
 
-![3D Print 1](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3892.jpg)
-![3D Print 2](https://github.com/no3z/ScratchTJ/raw/main/docs/IMG_3893.jpg)
+![Assembled Front View](https://github.com/no3z/ScratchTJ/raw/main/docs/assembled_front_view.jpg)
+![Assembled Back View](https://github.com/no3z/ScratchTJ/raw/main/docs/assembled_back_view.jpg)
 
 ## Build Photos
 
-![Soldering Station](https://github.com/no3z/ScratchTJ/raw/main/docs/soldering_station_setup.jpg)
-![Enclosure and Controls](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_and_controls.jpg)
-![Testing the Assembly](https://github.com/no3z/ScratchTJ/raw/main/docs/testing_assembly.jpg)
-![Workbench Setup](https://github.com/no3z/ScratchTJ/raw/main/docs/initial_build_setup.jpg)
-![Optical Encoder and HDD Platter](https://github.com/no3z/ScratchTJ/raw/main/docs/optical_encoder_and_platter.jpg)
+![LCD and Encoder on Breadboard](https://github.com/no3z/ScratchTJ/raw/main/docs/lcd_encoder_breadboard.jpg)
+![Breadboard Prototyping](https://github.com/no3z/ScratchTJ/raw/main/docs/breadboard_prototyping.jpg)
+![600 PPR Rotary Encoder](https://github.com/no3z/ScratchTJ/raw/main/docs/600ppr_encoder_closeup.jpg)
+![Enclosure Side View](https://github.com/no3z/ScratchTJ/raw/main/docs/enclosure_side_view.jpg)
+![Assembled Top View](https://github.com/no3z/ScratchTJ/raw/main/docs/assembled_top_view.jpg)
 
 ## Software Overview
 

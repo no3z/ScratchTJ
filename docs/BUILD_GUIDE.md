@@ -12,7 +12,7 @@ ScratchTJ is a portable digital turntable you can use to scratch sounds like a D
 
 Here's what it looks like when it's done:
 
-![Finished Build](enclosure_and_controls.jpg)
+![Assembled Front View](assembled_front_view.jpg)
 
 **How it works in a nutshell:**
 
@@ -327,7 +327,7 @@ Menu Encoder             Raspberry Pi
 
 These two buttons are used for Enter/Back navigation in the menu, and more importantly, they become **cue point triggers** in the deck's CUE screen.
 
-![2 Buttons Add-on](2buttons.png)
+![Button Extender 3D Model](button_extender_3d_model.png)
 
 ```
 Buttons                  Raspberry Pi
@@ -398,8 +398,8 @@ Houses the Raspberry Pi, Arduino, fader, LCD, and encoder. The platter encoder m
 
 An add-on bracket that holds the two navigation/cue buttons in a comfortable position.
 
-![3D Printed Parts](IMG_3892.jpg)
-![3D Printed Parts](IMG_3893.jpg)
+![Assembled Front View](assembled_front_view.jpg)
+![Assembled Back View](assembled_back_view.jpg)
 
 ---
 
@@ -528,17 +528,17 @@ Found settings you like? Go to **Config > Presets** to save them into one of 5 p
 
 Here are some photos from the build process to help you visualize the assembly:
 
-![Soldering Station](soldering_station_setup.jpg)
+![LCD and Encoder on Breadboard](lcd_encoder_breadboard.jpg)
 
-![Workbench Setup](initial_build_setup.jpg)
+![Enclosure Side View](enclosure_side_view.jpg)
 
-![Encoder and Platter](optical_encoder_and_platter.jpg)
+![Assembled Top View](assembled_top_view.jpg)
 
-![Testing the Assembly](testing_assembly.jpg)
+![600 PPR Rotary Encoder](600ppr_encoder_closeup.jpg)
 
-![Resistor Array](resistor_array.jpg)
+![Capacitive Sensing Resistor](capacitive_resistor_closeup.jpg)
 
-![LCD Menu Breadboard Testing](lcd_menu_breadboard.jpg)
+![Workbench Overview](workbench_overview.jpg)
 
 ---
 
