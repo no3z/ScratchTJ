@@ -2,7 +2,7 @@
 
 **A step-by-step guide to building your own portable DJ scratch instrument**
 
-> This guide is written so that anyone — even a 10-year-old with some curiosity and a helping hand — can follow along. We'll explain every part, every wire, and every trick.
+> This guide is written so that anyone can follow along. We'll explain every part, every wire, and every trick.
 
 ---
 
@@ -13,12 +13,6 @@ ScratchTJ is a portable digital turntable you can use to scratch sounds like a D
 Here's what it looks like when it's done:
 
 ![Assembled Front View — the finished ScratchTJ with HDD platter, LCD, fader, and 3D-printed enclosure](assembled_front_view.jpg)
-
-![Assembled Back View — audio jacks, USB, and power connections](assembled_back_view.jpg)
-
-The project was inspired by the **SC500/SC1000** portable turntable by the_rasteri:
-
-![The original SC500 — the inspiration for ScratchTJ](sc500_original_reference.jpg)
 
 **How it works in a nutshell:**
 
@@ -63,6 +57,8 @@ Here's your shopping list. Most of these can be found on AliExpress, Amazon, or 
 ---
 
 ## Step 1: Understanding the Big Picture
+
+![Assembled Back View — audio jacks, USB, and power connections](assembled_back_view.jpg)
 
 Before we wire anything, let's understand how data flows through the system:
 
