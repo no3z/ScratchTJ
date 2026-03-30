@@ -474,43 +474,53 @@ static unsigned long millis_now(void) {
     return (unsigned long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
+/* Remap Arduino pins to cue indices: A0→CUE1, A3→CUE2, A1→CUE3, A2→CUE4 */
+static const int cue_pin_map[4] = {0, 2, 3, 1}; /* bit index → cue index */
+
 void process_cue_buttons(uint8_t button_byte) {
     unsigned long now = millis_now();
 
-    for (int i = 0; i < 4; i++) {
-        int cur = (button_byte >> i) & 1;
-        int prev = (last_button_byte >> i) & 1;
+    for (int bit = 0; bit < 4; bit++) {
+        int i = cue_pin_map[bit]; /* cue index */
+        int cur = (button_byte >> bit) & 1;
+        int prev = (last_button_byte >> bit) & 1;
 
         /* Rising edge - button pressed */
         if (cur && !prev) {
             cue_press_time[i] = now;
         }
 
+        /* Long-press threshold reached while held — set cue immediately */
+        if (cur && cue_press_time[i] > 0 &&
+            (now - cue_press_time[i]) >= CUE_LONG_PRESS_MS &&
+            cue_press_time[i] != 1) {
+            cues_set(&deck[1].cues, i, player_get_elapsed(&deck[1].player));
+            if (deck[1].player.track && deck[1].player.track->path)
+                cues_save_to_file(&deck[1].cues, deck[1].player.track->path);
+            cue_display_states[i] = CUE_STATE_SET;
+            cue_press_time[i] = 1; /* mark as fired this press */
+            printf("Cue %d set\n", i + 1);
+        }
+
         /* Falling edge - button released */
         if (!cur && prev) {
-            unsigned long held = now - cue_press_time[i];
-            if (held >= CUE_LONG_PRESS_MS) {
-                /* Long press: set cue at current position (overwrite) */
-                cues_set(&deck[1].cues, i, player_get_elapsed(&deck[1].player));
-                if (deck[1].player.track && deck[1].player.track->path)
-                    cues_save_to_file(&deck[1].cues, deck[1].player.track->path);
-                cue_display_states[i] = CUE_STATE_SET;
-                printf("Cue %d set\n", i + 1);
-            } else {
+            unsigned long held = (cue_press_time[i] == 1) ? CUE_LONG_PRESS_MS : (now - cue_press_time[i]);
+            if (held < CUE_LONG_PRESS_MS) {
                 /* Short press: jump to cue if set */
                 double pos = cues_get(&deck[1].cues, i);
                 if (pos != CUE_UNSET) {
                     player_seek_to(&deck[1].player, pos);
+                    /* Move position to cue point and resync encoder */
+                    deck[1].player.position = deck[1].player.position - deck[1].player.offset;
+                    deck[1].player.offset = 0.0;
+                    float platterspeed;
+                    get_variable_value("platterspeed", &platterspeed);
+                    deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
+                    deck[1].player.target_position = deck[1].player.position;
                     cue_display_states[i] = CUE_STATE_ACTIVE;
                     printf("Cue %d triggered\n", i + 1);
                 }
             }
-        }
-
-        /* Long-press feedback while held */
-        if (cur && cue_press_time[i] > 0 &&
-            (now - cue_press_time[i]) >= CUE_LONG_PRESS_MS) {
-            cue_display_states[i] = CUE_STATE_ACTIVE;
         }
     }
 

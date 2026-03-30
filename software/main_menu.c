@@ -26,6 +26,7 @@ static int menuSize = 5;
 static int prev_cue_states[4] = {0, 0, 0, 0};
 static unsigned long cue_flash_time = 0;
 static int cue_flash_idx = -1;
+static unsigned long cue_trigger_time[4] = {0, 0, 0, 0};
 
 static unsigned long main_millis(void) {
     struct timespec ts;
@@ -250,21 +251,34 @@ void display_home_screen(struct deck *decks[], int deck_count) {
     /* ── Deck 1 compact strip (y=176..194) ───────────────────── */
     draw_deck_compact(decks[0], 1, THEME_DECK1_ACCENT, 176);
 
-    /* ── Cue-set flash banner (y=200, 500ms) ─────────────────── */
+    /* ── Cue flash logic ──────────────────────────────────────── */
     {
         unsigned long now = main_millis();
         for (int i = 0; i < 4; i++) {
+            /* Detect cue set transition → show banner */
             if (cue_display_states[i] == CUE_STATE_SET &&
                 prev_cue_states[i] != CUE_STATE_SET) {
                 cue_flash_idx = i;
                 cue_flash_time = now;
             }
+            /* Detect cue trigger transition → start color flash */
+            if (cue_display_states[i] == CUE_STATE_ACTIVE &&
+                prev_cue_states[i] != CUE_STATE_ACTIVE) {
+                cue_trigger_time[i] = now;
+            }
+            /* Revert triggered cue back to set after 300ms */
+            if (cue_display_states[i] == CUE_STATE_ACTIVE &&
+                cue_trigger_time[i] > 0 &&
+                (now - cue_trigger_time[i]) >= 300) {
+                cue_display_states[i] = CUE_STATE_SET;
+                cue_trigger_time[i] = 0;
+            }
             prev_cue_states[i] = cue_display_states[i];
         }
         if (cue_flash_idx >= 0 && (now - cue_flash_time) < 500) {
             snprintf(buf, sizeof(buf), "CUE %d SET", cue_flash_idx + 1);
-            int bw = st7789_string_width(buf, FONT_SMALL);
-            oled_text_color((DISPLAY_WIDTH - bw) / 2, 200, buf, FONT_SMALL,
+            int bw = st7789_string_width(buf, FONT_MEDIUM);
+            oled_text_color((DISPLAY_WIDTH - bw) / 2, 198, buf, FONT_MEDIUM,
                             THEME_CUE_SET);
         } else {
             cue_flash_idx = -1;

@@ -3,23 +3,40 @@
 #include "xwax.h"
 #include "shared_variables.h"
 #include "track.h"
-#include "sc_input.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/stat.h>
-#include <time.h>
+#include <errno.h>
 
 // Globals
-extern int lcdHandle;
 extern bool needsUpdate;
+extern MainMenuState mainMenuState;
 extern SC_SETTINGS scsettings;
 
 // Preset directory
 #define PRESET_DIR "/home/no3z/.scratchtj/presets"
 #define PRESET_FILE_FMT "%s/preset_%d.cfg"
 #define LAST_PRESET_FILE "%s/last_preset.txt"
-#define NUM_PRESET_SLOTS 5
+
+// Menu state
+typedef enum {
+    PRESET_MAIN,
+    PRESET_LOAD,
+    PRESET_SAVE
+} PresetMenuState;
+
+static PresetMenuState presetMenuState = PRESET_MAIN;
+static int selectedPresetSlot = 0;
+
+// Preset menu options
+static const char *presetMainOptions[] = {
+    "Load Preset",
+    "Save Preset"
+};
+
+static const char *slotLabels[] = {"Slot 1", "Slot 2", "Slot 3"};
 
 // Function to create preset directory if it doesn't exist
 static void ensure_preset_directory() {
@@ -29,230 +46,103 @@ static void ensure_preset_directory() {
     }
 }
 
-// Read the saved date from a preset file, returns 1 if found
-static int get_preset_date(int slot, char *datebuf, int bufsize) {
-    char filename[512];
-    snprintf(filename, sizeof(filename), PRESET_FILE_FMT, PRESET_DIR, slot);
+// Display Preset Menu
+void display_preset_menu() {
+    oled_clear();
 
-    FILE *f = fopen(filename, "r");
-    if (!f) return 0;
-
-    char line[512];
-    char section[64] = "";
-    while (fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\n")] = 0;
-        if (line[0] == '#' || line[0] == '\0') continue;
-        if (line[0] == '[') {
-            sscanf(line, "[%63[^]]]", section);
-            continue;
-        }
-        if (strcmp(section, "metadata") == 0) {
-            char key[128], value[384];
-            if (sscanf(line, "%127[^=]=%383[^\n]", key, value) == 2) {
-                if (strcmp(key, "date") == 0) {
-                    strncpy(datebuf, value, bufsize - 1);
-                    datebuf[bufsize - 1] = '\0';
-                    fclose(f);
-                    return 1;
-                }
-            }
-        }
+    if (presetMenuState == PRESET_MAIN) {
+        oled_draw_title_bar("Presets");
+        oled_draw_menu_list(presetMainOptions, 2, selectedPresetSlot, 0, MENU_VISIBLE_LINES);
+    } else if (presetMenuState == PRESET_LOAD) {
+        oled_draw_title_bar("Load Preset");
+        oled_draw_menu_list(slotLabels, 3, selectedPresetSlot, 0, MENU_VISIBLE_LINES);
+    } else if (presetMenuState == PRESET_SAVE) {
+        oled_draw_title_bar("Save Preset");
+        oled_draw_menu_list(slotLabels, 3, selectedPresetSlot, 0, MENU_VISIBLE_LINES);
     }
-    fclose(f);
-    return 0;
+
+    oled_flush();
 }
 
-// Check if a preset slot file exists
-static int preset_slot_exists(int slot) {
-    char filename[512];
-    snprintf(filename, sizeof(filename), PRESET_FILE_FMT, PRESET_DIR, slot);
-    struct stat st;
-    return (stat(filename, &st) == 0);
-}
+// Handle Preset Menu Navigation
+void handle_preset_menu_navigation(struct deck *decks[]) {
+    int encoder_movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
 
-// Blocking submenu: Save
-static void enter_save_submenu(struct deck *decks[]) {
-    int selected = 0;
-    needsUpdate = true;
-    bool active = true;
-
-    while (active) {
-        int movement = rotary_encoder_moved();
-        int button = rotary_button_pressed();
-
-        if (movement != 0) {
-            selected = (selected + movement + NUM_PRESET_SLOTS) % NUM_PRESET_SLOTS;
+    if (presetMenuState == PRESET_MAIN) {
+        // Main preset menu - choose Load or Save
+        if (encoder_movement != 0) {
+            selectedPresetSlot = (selectedPresetSlot + encoder_movement + 2) % 2;
             needsUpdate = true;
         }
 
-        if (button == 1) {
-            save_preset_to_slot(selected + 1, decks);
-            save_last_preset_number(selected + 1);
-
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Saved!");
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPrintf(lcdHandle, "Preset %d", selected + 1);
-            delay(1000);
-            active = false;
-        } else if (button == 2) {
-            active = false;
-        }
-
-        if (needsUpdate) {
-            char datebuf[32];
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Save to Slot");
-            lcdPosition(lcdHandle, 0, 1);
-            if (get_preset_date(selected + 1, datebuf, sizeof(datebuf))) {
-                lcdPrintf(lcdHandle, "%d: %s", selected + 1, datebuf);
-            } else if (preset_slot_exists(selected + 1)) {
-                lcdPrintf(lcdHandle, "%d: Used", selected + 1);
+        if (button_press == 1) { // Short press - enter submenu
+            if (selectedPresetSlot == 0) {
+                presetMenuState = PRESET_LOAD;
             } else {
-                lcdPrintf(lcdHandle, "%d: Empty", selected + 1);
+                presetMenuState = PRESET_SAVE;
             }
-            needsUpdate = false;
+            selectedPresetSlot = 0; // Reset to slot 1
+            needsUpdate = true;
+        } else if (button_press == 2) { // Long press - back to main
+            mainMenuState = MENU_MAIN;
+            presetMenuState = PRESET_MAIN;
+            needsUpdate = true;
+        }
+    } else if (presetMenuState == PRESET_LOAD) {
+        // Load preset submenu - select slot
+        if (encoder_movement != 0) {
+            selectedPresetSlot = (selectedPresetSlot + encoder_movement + 3) % 3;
+            needsUpdate = true;
+        }
+
+        if (button_press == 1) { // Short press - load preset
+            load_preset_from_slot(selectedPresetSlot + 1, decks);
+            save_last_preset_number(selectedPresetSlot + 1);
+
+            // Show confirmation on TFT
+            oled_clear();
+            oled_draw_confirm("Loaded!", "Preset");
+            oled_flush();
+            usleep(1000000);
+
+            presetMenuState = PRESET_MAIN;
+            selectedPresetSlot = 0;
+            needsUpdate = true;
+        } else if (button_press == 2) { // Long press - back to main
+            presetMenuState = PRESET_MAIN;
+            selectedPresetSlot = 0;
+            needsUpdate = true;
+        }
+    } else if (presetMenuState == PRESET_SAVE) {
+        // Save preset submenu - select slot
+        if (encoder_movement != 0) {
+            selectedPresetSlot = (selectedPresetSlot + encoder_movement + 3) % 3;
+            needsUpdate = true;
+        }
+
+        if (button_press == 1) { // Short press - save preset
+            save_preset_to_slot(selectedPresetSlot + 1, decks);
+            save_last_preset_number(selectedPresetSlot + 1);
+
+            // Show confirmation on TFT
+            oled_clear();
+            oled_draw_confirm("Saved!", "Preset");
+            oled_flush();
+            usleep(1000000);
+
+            presetMenuState = PRESET_MAIN;
+            selectedPresetSlot = 0;
+            needsUpdate = true;
+        } else if (button_press == 2) { // Long press - back to main
+            presetMenuState = PRESET_MAIN;
+            selectedPresetSlot = 0;
+            needsUpdate = true;
         }
     }
 }
 
-// Blocking submenu: Load
-static void enter_load_submenu(struct deck *decks[]) {
-    int selected = 0;
-    needsUpdate = true;
-    bool active = true;
-
-    while (active) {
-        int movement = rotary_encoder_moved();
-        int button = rotary_button_pressed();
-
-        if (movement != 0) {
-            selected = (selected + movement + NUM_PRESET_SLOTS) % NUM_PRESET_SLOTS;
-            needsUpdate = true;
-        }
-
-        if (button == 1) {
-            if (preset_slot_exists(selected + 1)) {
-                load_preset_from_slot(selected + 1, decks);
-                save_last_preset_number(selected + 1);
-
-                lcdClear(lcdHandle);
-                lcdPosition(lcdHandle, 0, 0);
-                lcdPuts(lcdHandle, "Loaded!");
-                lcdPosition(lcdHandle, 0, 1);
-                lcdPrintf(lcdHandle, "Preset %d", selected + 1);
-                delay(1000);
-                active = false;
-            } else {
-                lcdClear(lcdHandle);
-                lcdPosition(lcdHandle, 0, 0);
-                lcdPuts(lcdHandle, "Slot Empty");
-                delay(800);
-                needsUpdate = true;
-            }
-        } else if (button == 2) {
-            active = false;
-        }
-
-        if (needsUpdate) {
-            char datebuf[32];
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Load Preset");
-            lcdPosition(lcdHandle, 0, 1);
-            if (get_preset_date(selected + 1, datebuf, sizeof(datebuf))) {
-                lcdPrintf(lcdHandle, "%d: %s", selected + 1, datebuf);
-            } else if (preset_slot_exists(selected + 1)) {
-                lcdPrintf(lcdHandle, "%d: Used", selected + 1);
-            } else {
-                lcdPrintf(lcdHandle, "%d: Empty", selected + 1);
-            }
-            needsUpdate = false;
-        }
-    }
-}
-
-// Blocking submenu: Reset confirm
-static void enter_reset_submenu(void) {
-    needsUpdate = true;
-    int selected = 1; // Default to "No"
-    bool active = true;
-
-    while (active) {
-        int movement = rotary_encoder_moved();
-        int button = rotary_button_pressed();
-
-        if (movement != 0) {
-            selected = (selected + movement + 2) % 2;
-            needsUpdate = true;
-        }
-
-        if (button == 1) {
-            if (selected == 0) { // Yes
-                reset_to_defaults();
-                lcdClear(lcdHandle);
-                lcdPosition(lcdHandle, 0, 0);
-                lcdPuts(lcdHandle, "Reset Done!");
-                delay(1000);
-            }
-            active = false;
-        } else if (button == 2) {
-            active = false;
-        }
-
-        if (needsUpdate) {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Reset defaults?");
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPrintf(lcdHandle, selected == 0 ? "> Yes" : "> No");
-            needsUpdate = false;
-        }
-    }
-}
-
-// Main preset submenu (blocking loop)
-void enter_preset_submenu(struct deck *decks[]) {
-    const char *options[] = {"Save", "Load", "Reset"};
-    int optionCount = 3;
-    int selected = 0;
-    needsUpdate = true;
-    bool active = true;
-
-    while (active) {
-        int movement = rotary_encoder_moved();
-        int button = rotary_button_pressed();
-
-        if (movement != 0) {
-            selected = (selected + movement + optionCount) % optionCount;
-            needsUpdate = true;
-        }
-
-        if (button == 1) {
-            switch (selected) {
-                case 0: enter_save_submenu(decks); break;
-                case 1: enter_load_submenu(decks); break;
-                case 2: enter_reset_submenu(); break;
-            }
-            needsUpdate = true;
-        } else if (button == 2) {
-            active = false;
-        }
-
-        if (needsUpdate) {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Presets");
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPrintf(lcdHandle, "%s", options[selected]);
-            needsUpdate = false;
-        }
-    }
-}
-
-// Save preset to slot (with date metadata)
+// Save preset to slot
 void save_preset_to_slot(int slot, struct deck *decks[]) {
     ensure_preset_directory();
 
@@ -265,12 +155,8 @@ void save_preset_to_slot(int slot, struct deck *decks[]) {
         return;
     }
 
-    // Write metadata with timestamp
-    time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
-    fprintf(f, "[metadata]\n");
-    fprintf(f, "date=%02d/%02d %02d:%02d\n\n",
-            tm->tm_mday, tm->tm_mon + 1, tm->tm_hour, tm->tm_min);
+    fprintf(f, "# ScratchTJ Preset %d\n", slot);
+    fprintf(f, "# Auto-generated\n\n");
 
     // Save deck 0 state
     fprintf(f, "[deck0]\n");
@@ -401,25 +287,6 @@ void load_preset_from_slot(int slot, struct deck *decks[]) {
     }
 
     printf("Preset %d loaded from %s\n", slot, filename);
-}
-
-// Reset all settings to defaults
-void reset_to_defaults(void) {
-    // Reset integer settings to defaults (from xwax.c)
-    scsettings.buffersize = 256;
-    scsettings.faderclosepoint = 2;
-    scsettings.faderopenpoint = 10;
-    scsettings.platterspeed = 2275;
-    scsettings.slippiness = 200;
-    scsettings.brakespeed = 3000;
-    scsettings.pitchrange = 50;
-    scsettings.jogReverse = 0;
-    scsettings.cutbeats = 0;
-
-    // Reset float variables to their registered defaults
-    reset_all_variables_to_defaults();
-
-    printf("All settings reset to defaults\n");
 }
 
 // Load last preset number

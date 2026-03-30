@@ -4,7 +4,7 @@
 #include <string.h>
 
 // Maximum number of editable variables
-#define MAX_VARIABLES 16
+#define MAX_VARIABLES 10
 
 // Array to store editable variables
 static EditableVariable variables[MAX_VARIABLES];
@@ -21,7 +21,6 @@ void register_variable(const char *name, float *valuePtr, float minValue, float 
     variables[variableCount].minValue = minValue;
     variables[variableCount].maxValue = maxValue;
     variables[variableCount].stepSize = stepSize;
-    variables[variableCount].defaultValue = *valuePtr;
     pthread_mutex_init(&variables[variableCount].mutex, NULL);
     variableCount++;
 }
@@ -59,13 +58,4 @@ bool set_variable_value(const char *name, float newValue) {
 EditableVariable *get_editable_variables(int *count) {
     *count = variableCount;
     return variables;
-}
-
-// Reset all variables to their default values
-void reset_all_variables_to_defaults(void) {
-    for (int i = 0; i < variableCount; i++) {
-        pthread_mutex_lock(&variables[i].mutex);
-        *variables[i].valuePtr = variables[i].defaultValue;
-        pthread_mutex_unlock(&variables[i].mutex);
-    }
 }
