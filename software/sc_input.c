@@ -601,16 +601,22 @@ void process_pic()
 	float curvePower;
     get_variable_value("Fad Power", &curvePower);
 
-    if (fader <= 0.5) {
+    /* Deadzone at extremes: hard-cut below 2% or above 98% */
+    if (fader < 0.02) {
+        deck[0].player.faderTarget = 0.0;
+        deck[1].player.faderTarget = 1.0;
+    } else if (fader > 0.98) {
+        deck[0].player.faderTarget = 1.0;
+        deck[1].player.faderTarget = 0.0;
+    } else if (fader <= 0.5) {
         deck[1].player.faderTarget = 1.0;
         deck[0].player.faderTarget = pow(fader / curveFactor, curvePower);
+        if (deck[0].player.faderTarget > 1.0) deck[0].player.faderTarget = 1.0;
     } else {
-        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower);
         deck[0].player.faderTarget = 1.0;
+        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower);
+        if (deck[1].player.faderTarget > 1.0) deck[1].player.faderTarget = 1.0;
     }
-
-    if (deck[0].player.faderTarget > 1.0) deck[0].player.faderTarget = 1.0;
-    if (deck[1].player.faderTarget > 1.0) deck[1].player.faderTarget = 1.0;
 }
 
 // Keep a running average of speed so if we suddenly let go it keeps going at that speed
