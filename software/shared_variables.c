@@ -28,7 +28,7 @@ void register_variable(const char *name, float *valuePtr, float minValue, float 
 // Get the value of a variable safely
 bool get_variable_value(const char *name, float *outValue) {
     for (int i = 0; i < variableCount; i++) {
-        if (strcmp(variables[i].name, name) == 0) {
+        if (variables[i].name && strcmp(variables[i].name, name) == 0) {
             pthread_mutex_lock(&variables[i].mutex);
             *outValue = *(variables[i].valuePtr);
             pthread_mutex_unlock(&variables[i].mutex);
@@ -41,7 +41,7 @@ bool get_variable_value(const char *name, float *outValue) {
 // Set the value of a variable safely
 bool set_variable_value(const char *name, float newValue) {
     for (int i = 0; i < variableCount; i++) {
-        if (strcmp(variables[i].name, name) == 0) {
+        if (variables[i].name && strcmp(variables[i].name, name) == 0) {
             if (newValue < variables[i].minValue || newValue > variables[i].maxValue) {
                 return false; // Value out of bounds
             }

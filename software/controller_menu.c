@@ -2,56 +2,56 @@
 #include "lcd_menu.h"
 #include "alsa_mixer.h"
 #include <stdio.h>
+#include <unistd.h>
 #include "sc_input.h"
 #include "xwax.h"
 #include "shared_variables.h"
 
-// Constants
+/* Constants */
 #define MAX_MIXER_CONTROLS 20
 
-// Globals
-extern int lcdHandle;    // LCD handle defined elsewhere
-extern bool needsUpdate; // Global flag for display updates
+/* Globals */
+extern bool needsUpdate;
 extern MainMenuState mainMenuState;
 
 static ControllerMenuOption selectedOption = CONTROLLER_SOUND_SETTINGS;
 static MixerControl mixerControls[MAX_MIXER_CONTROLS];
 static int mixerControlCount = 0;
 
-// Controller menu options
-const char *controllerOptions[] = {
+/* Controller menu options */
+static const char *controllerOptions[] = {
     "Sound Settings",
     "Global Settings"
 };
 
-// Function Prototypes
-void adjust_mixer_control(int selectedIndex);
-void adjust_variable_value(EditableVariable *variable);
+/* Forward declarations */
+static void adjust_mixer_control(int selectedIndex);
+static void adjust_variable_value(EditableVariable *variable);
+static void display_mixer_control(MixerControl *control);
 
-// Display Controller Menu
+/* Display Controller Menu */
 void display_controller_menu(struct deck *d, int deck_no) {
-    lcdClear(lcdHandle);
-    lcdPosition(lcdHandle, 0, 0);
-    lcdPuts(lcdHandle, "Config");
-
-    // Display selected option
-    lcdPosition(lcdHandle, 0, 1);
-    lcdPrintf(lcdHandle, controllerOptions[selectedOption]);
+    oled_clear();
+    oled_draw_title_bar("Config");
+    oled_draw_menu_list(controllerOptions, CONTROLLER_MENU_OPTION_COUNT,
+                        selectedOption, 0, MENU_VISIBLE_LINES);
+    oled_flush();
 }
 
-// Handle Controller Menu Navigation
+/* Handle Controller Menu Navigation */
 void handle_controller_menu_navigation(struct deck *d, int deckno) {
     int encoder_movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
+    int kb0 = kb0_button_pressed();
 
-    // Update selected option based on encoder movement
     if (encoder_movement != 0) {
-        selectedOption = (ControllerMenuOption)((selectedOption + encoder_movement + CONTROLLER_MENU_OPTION_COUNT) % CONTROLLER_MENU_OPTION_COUNT);
+        selectedOption = (ControllerMenuOption)((selectedOption + encoder_movement +
+                          CONTROLLER_MENU_OPTION_COUNT) % CONTROLLER_MENU_OPTION_COUNT);
         needsUpdate = true;
     }
 
-    // Handle button press to activate the selected option
-    if (button_press == 1) { // Short press to select
+    /* KB0 = select */
+    if (kb0 == 1) {
         switch (selectedOption) {
             case CONTROLLER_SOUND_SETTINGS:
                 enter_sound_settings_menu(d, deckno);
@@ -59,15 +59,43 @@ void handle_controller_menu_navigation(struct deck *d, int deckno) {
             case CONTROLLER_GLOBAL_SETTINGS:
                 enter_global_settings_menu(d, deckno);
                 break;
+            default:
+                break;
         }
         needsUpdate = true;
-    } else if (button_press == 2) { // Long press to return to main menu
+    }
+    /* Rotary click = back */
+    if (button_press == 1) {
         mainMenuState = MENU_MAIN;
         needsUpdate = true;
     }
 }
 
-// Enter Sound Settings Menu
+/* Display a mixer control value */
+static void display_mixer_control(MixerControl *control) {
+    char val_str[32];
+    char range_str[32];
+
+    oled_clear();
+
+    if (control->isVolume) {
+        snprintf(val_str, sizeof(val_str), "%ld", control->current);
+        snprintf(range_str, sizeof(range_str), "%ld - %ld", control->min, control->max);
+        oled_draw_value_screen(control->name, val_str, range_str);
+    } else if (control->isBoolean) {
+        snprintf(val_str, sizeof(val_str), "%s", control->current ? "On" : "Off");
+        oled_draw_value_screen(control->name, val_str, "On/Off");
+    } else if (control->isEnum) {
+        oled_draw_value_screen(control->name,
+                               control->enumItems[control->currentEnumIndex], NULL);
+    } else {
+        oled_draw_value_screen(control->name, "Unknown", NULL);
+    }
+
+    oled_flush();
+}
+
+/* Enter Sound Settings Menu */
 void enter_sound_settings_menu(struct deck *d, int deckno) {
     mixerControlCount = get_mixer_controls("default", mixerControls, MAX_MIXER_CONTROLS);
 
@@ -75,161 +103,174 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
         printf("No mixer controls found!\n");
         return;
     }
-    needsUpdate = true;
+
     bool adjusting = true;
     int selectedControl = 0;
+    int scrollOff = 0;
+    needsUpdate = true;
 
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
+        int kb0 = kb0_button_pressed();
 
         if (movement != 0) {
             selectedControl = (selectedControl + movement + mixerControlCount) % mixerControlCount;
             needsUpdate = true;
         }
 
-        if (button_press == 1) { // Adjust selected control
+        if (kb0 == 1) {
             adjust_mixer_control(selectedControl);
             needsUpdate = true;
-
-        } else if (button_press == 2) { // Exit sound settings
+        }
+        if (button_press == 1) {
             adjusting = false;
         }
 
         if (needsUpdate) {
-            MixerControl *control = &mixerControls[selectedControl];
+            const char *labels[MAX_MIXER_CONTROLS];
+            for (int i = 0; i < mixerControlCount; i++)
+                labels[i] = mixerControls[i].name;
 
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-
-
-            if (control->isVolume) {
-                lcdPrintf(lcdHandle, "%s", control->name);
-                lcdPosition(lcdHandle, 0, 1);
-                lcdPrintf(lcdHandle, "[%ld/%ld]", control->current, control->max);
-            } else if (control->isBoolean) {
-                lcdPrintf(lcdHandle, "%s", control->name);
-                lcdPosition(lcdHandle, 0, 1);
-                lcdPrintf(lcdHandle, "[%s]",  control->current ? "On" : "Off");
-            } else if (control->isEnum) {
-                lcdPrintf(lcdHandle, "%s", control->name);
-                lcdPosition(lcdHandle, 0, 1);
-                lcdPrintf(lcdHandle, "[%s]", control->enumItems[control->currentEnumIndex]);
-            } else {
-                lcdPosition(lcdHandle, 0, 1);
-                lcdPrintf(lcdHandle, "%s [Unknown]", control->name);
-            }
-
+            scrollOff = oled_compute_scroll(selectedControl, scrollOff, MENU_VISIBLE_LINES);
+            oled_clear();
+            oled_draw_title_bar("Sound Settings");
+            oled_draw_menu_list(labels, mixerControlCount, selectedControl,
+                                scrollOff, MENU_VISIBLE_LINES);
+            oled_flush();
             needsUpdate = false;
         }
+
+        usleep(5000);
     }
 }
 
-// Adjust a specific Mixer Control
-void adjust_mixer_control(int selectedIndex) {
+/* Adjust a specific Mixer Control */
+static void adjust_mixer_control(int selectedIndex) {
     MixerControl *control = &mixerControls[selectedIndex];
     bool adjusting = true;
     needsUpdate = true;
+
+    /* Save original values for cancel/revert */
+    long orig_current = control->current;
+    int orig_enumIndex = control->currentEnumIndex;
+
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
+        int kb0 = kb0_button_pressed();
 
-        if (control->isVolume) {
-            if (movement != 0) {
+        /* EC11 rotary = change value */
+        if (movement != 0) {
+            if (control->isVolume) {
                 control->current += movement;
                 if (control->current < control->min) control->current = control->min;
                 if (control->current > control->max) control->current = control->max;
-
                 set_mixer_control("default", control->name, control->current);
-                needsUpdate = true;
-            }
-        } else if (control->isBoolean) {
-            if (button_press == 1) {
+            } else if (control->isBoolean) {
                 control->current = !control->current;
                 set_mixer_control_boolean("default", control->name, control->current);
-                needsUpdate = true;
-            }
-        } else if (control->isEnum) {
-            if (movement != 0) {
-                control->currentEnumIndex = (control->currentEnumIndex + movement + control->enumItemCount) % control->enumItemCount;
+            } else if (control->isEnum) {
+                control->currentEnumIndex = (control->currentEnumIndex + movement +
+                                             control->enumItemCount) % control->enumItemCount;
                 set_mixer_control_enum("default", control->name, control->currentEnumIndex);
-                needsUpdate = true;
             }
+            needsUpdate = true;
         }
 
-        if (button_press == 1 || button_press == 2) { // Exit adjustment
+        /* KB0 = confirm */
+        if (kb0 == 1) {
+            adjusting = false;
+        }
+        /* Rotary click = cancel (revert) */
+        if (button_press == 1) {
+            if (control->isVolume) {
+                control->current = orig_current;
+                set_mixer_control("default", control->name, control->current);
+            } else if (control->isBoolean) {
+                control->current = orig_current;
+                set_mixer_control_boolean("default", control->name, control->current);
+            } else if (control->isEnum) {
+                control->currentEnumIndex = orig_enumIndex;
+                set_mixer_control_enum("default", control->name, control->currentEnumIndex);
+            }
             adjusting = false;
         }
 
         if (needsUpdate) {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPrintf(lcdHandle, "%s:", control->name);
-            lcdPosition(lcdHandle, 0, 1);
-
-            if (control->isVolume) {
-                lcdPrintf(lcdHandle, "%ld/%ld", control->current, control->max);
-            } else if (control->isBoolean) {
-                lcdPrintf(lcdHandle, "%s", control->current ? "On" : "Off");
-            } else if (control->isEnum) {
-                lcdPrintf(lcdHandle, "%s", control->enumItems[control->currentEnumIndex]);
-            } else {
-                lcdPrintf(lcdHandle, "[Unknown]");
-            }
-
+            display_mixer_control(control);
             needsUpdate = false;
         }
+
+        usleep(5000);
     }
 }
 
-// Enter Global Settings Menu
+/* Enter Global Settings Menu */
 void enter_global_settings_menu(struct deck *d, int deckno) {
     int variableIndex = 0;
     int variableCount = 0;
+    int scrollOff = 0;
     EditableVariable *variables = get_editable_variables(&variableCount);
 
     if (variableCount == 0) {
         printf("No global settings available!\n");
         return;
     }
+
     needsUpdate = true;
     bool adjusting = true;
+
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
+        int kb0 = kb0_button_pressed();
 
         if (movement != 0) {
             variableIndex = (variableIndex + movement + variableCount) % variableCount;
             needsUpdate = true;
         }
 
-        if (button_press == 1) { // Adjust selected variable
+        if (kb0 == 1) {
             adjust_variable_value(&variables[variableIndex]);
             needsUpdate = true;
-        } else if (button_press == 2) { // Exit global settings
+        }
+        if (button_press == 1) {
             adjusting = false;
         }
 
         if (needsUpdate) {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPuts(lcdHandle, "Global Settings");
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPrintf(lcdHandle, "%s", variables[variableIndex].name);
+            const char *labels[32];
+            int max = variableCount < 32 ? variableCount : 32;
+            for (int i = 0; i < max; i++)
+                labels[i] = variables[i].name;
+
+            scrollOff = oled_compute_scroll(variableIndex, scrollOff, MENU_VISIBLE_LINES);
+            oled_clear();
+            oled_draw_title_bar("Global Settings");
+            oled_draw_menu_list(labels, variableCount, variableIndex,
+                                scrollOff, MENU_VISIBLE_LINES);
+            oled_flush();
             needsUpdate = false;
         }
+
+        usleep(5000);
     }
 }
 
-// Adjust a specific Editable Variable
-void adjust_variable_value(EditableVariable *variable) {
+/* Adjust a specific Editable Variable */
+static void adjust_variable_value(EditableVariable *variable) {
     bool adjusting = true;
     float value = *variable->valuePtr;
+    float orig_value = value;
     needsUpdate = true;
+
     while (adjusting) {
         int movement = rotary_encoder_moved();
         int button_press = rotary_button_pressed();
+        int kb0 = kb0_button_pressed();
 
+        /* EC11 rotary = change value */
         if (movement != 0) {
             value += movement * variable->stepSize;
             if (value < variable->minValue) value = variable->minValue;
@@ -242,17 +283,31 @@ void adjust_variable_value(EditableVariable *variable) {
             needsUpdate = true;
         }
 
-        if (button_press == 1 || button_press == 2) { // Exit adjustment
+        /* KB0 = confirm */
+        if (kb0 == 1) {
+            adjusting = false;
+        }
+        /* Rotary click = cancel (revert) */
+        if (button_press == 1) {
+            pthread_mutex_lock(&variable->mutex);
+            *variable->valuePtr = orig_value;
+            pthread_mutex_unlock(&variable->mutex);
             adjusting = false;
         }
 
         if (needsUpdate) {
-            lcdClear(lcdHandle);
-            lcdPosition(lcdHandle, 0, 0);
-            lcdPrintf(lcdHandle, "%s:", variable->name);
-            lcdPosition(lcdHandle, 0, 1);
-            lcdPrintf(lcdHandle, "%.2f", value);
+            char val_str[16];
+            char range_str[32];
+            snprintf(val_str, sizeof(val_str), "%.2f", value);
+            snprintf(range_str, sizeof(range_str), "%.1f - %.1f",
+                     variable->minValue, variable->maxValue);
+
+            oled_clear();
+            oled_draw_value_screen(variable->name, val_str, range_str);
+            oled_flush();
             needsUpdate = false;
         }
+
+        usleep(5000);
     }
 }

@@ -73,6 +73,10 @@ OBJS = controller.o \
 	controller_menu.o \
 	info_menu.o \
 	lcd_menu.o \
+	gpio_direct.o \
+	st7789.o \
+	oled_display.o \
+	preset_menu.o \
 	shared_variables.o \
 	xwax.o
 DEVICE_CPPFLAGS = -DWITH_ALSA
@@ -98,13 +102,18 @@ VERSION = $(shell ./mkversion)
 # Main binary
 
 xwax:		$(OBJS)
-xwax:		LDLIBS += $(SDL_LIBS) $(DEVICE_LIBS) -lm -lwiringPi 
+xwax:		LDLIBS += $(SDL_LIBS) $(DEVICE_LIBS) -lm
 xwax:		LDFLAGS += -pthread
 
 #xwax.o:		CFLAGS += $(SDL_CFLAGS)
 xwax.o:		CPPFLAGS += $(DEVICE_CPPFLAGS)
 xwax.o:		CPPFLAGS += -DEXECDIR=\"$(EXECDIR)\" -DVERSION=\"$(VERSION)\"
 xwax.o:		.version
+
+# TFT UI test (standalone - no xwax deps)
+
+test_tft_ui:	test_tft_ui.o gpio_direct.o st7789.o oled_display.o
+		$(CC) $(LDFLAGS) -o $@ $^ -lm
 
 # Install to system
 

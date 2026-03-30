@@ -9,12 +9,12 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <fcntl.h>		   //Needed for I2C port
-#include <sys/ioctl.h>	   //Needed for I2C port
-#include <linux/i2c-dev.h> //Needed for I2C port
-#include <sys/mman.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+#include <sys/mman.h>
 #include <sys/time.h>
+#include <time.h>
 #include "sc_playlist.h"
 #include "alsa.h"
 #include "controller.h"
@@ -30,10 +30,28 @@
 #include "dicer.h"
 #include "midi.h"
 #include "lcd_menu.h"
-#include <termios.h> // For serial port settings
+#include <termios.h>
 #include "shared_variables.h"
+#include "oled_display.h"
 
-int serial_fd; // File descriptor for the serial port
+/* ── Serial protocol constants ─────────────────────────────────── */
+#define SERIAL_DEV    "/dev/serial0"
+#define SERIAL_BAUD   B500000
+#define SYNC_BYTE     0xAA
+#define HANDSHAKE_MAGIC 0x53
+#define PKT_LEN       7
+
+/* ── MT6701 constants ──────────────────────────────────────────── */
+#define MT6701_ADDR      0x06
+#define MT6701_ANGLE_H   0x03
+#define MT6701_ANGLE_L   0x04
+
+/* ── Encoder constants (14-bit) ────────────────────────────────── */
+#define ENCODER_CPR      16384
+
+/* ── Globals ───────────────────────────────────────────────────── */
+int serial_fd;
+static int i2c_mt6701_fd = -1;
 
 bool shifted = 0;
 bool shiftLatched = 0;
@@ -55,8 +73,10 @@ int numControllers = 0;
 		(byte & 0x01 ? '1' : '0')
 
 extern struct mapping *maps;
+
+/* ── Serial init (binary protocol, 500000 baud) ───────────────── */
 void init_serial(const char *port_name) {
-    serial_fd = open(port_name, O_RDWR | O_NOCTTY | O_NDELAY);
+    serial_fd = open(port_name, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (serial_fd < 0) {
         perror("Error opening serial port");
         exit(EXIT_FAILURE);
@@ -70,57 +90,61 @@ void init_serial(const char *port_name) {
         close(serial_fd);
         exit(EXIT_FAILURE);
     }
-    printf("Terminal attributes fetched successfully.\n");
 
-    // Set baud rate
-    cfsetospeed(&tty, B115200);
-    cfsetispeed(&tty, B115200);
-
-    // Enable receiver and set local mode
+    cfmakeraw(&tty);
+    cfsetispeed(&tty, SERIAL_BAUD);
+    cfsetospeed(&tty, SERIAL_BAUD);
     tty.c_cflag |= (CLOCAL | CREAD);
-
-    // Set character size to 8 bits
-    tty.c_cflag &= ~CSIZE;
-    tty.c_cflag |= CS8;
-
-    // No parity
-    tty.c_cflag &= ~PARENB;
-
-    // One stop bit
-    tty.c_cflag &= ~CSTOPB;
-
-    // No hardware flow control
     tty.c_cflag &= ~CRTSCTS;
-
-    // Raw input
-    tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP |
-                     INLCR | IGNCR | ICRNL | IXON | IXOFF | IXANY);
-
-    // Raw output
-    tty.c_oflag &= ~OPOST;
-
-    // Non-canonical mode, disable echo, signals, etc.
-    tty.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-
-    // Non-blocking read
     tty.c_cc[VMIN] = 0;
-    tty.c_cc[VTIME] = 1; // 0.1 second read timeout
+    tty.c_cc[VTIME] = 0;
 
-    // Apply the settings
     if (tcsetattr(serial_fd, TCSANOW, &tty) != 0) {
         perror("Error setting terminal attributes");
         close(serial_fd);
         exit(EXIT_FAILURE);
     }
-    printf("Terminal attributes applied successfully.\n");
-
-    // Flush the serial port buffers
     tcflush(serial_fd, TCIOFLUSH);
+
+    /* Send handshake */
+    uint8_t hs = HANDSHAKE_MAGIC;
+    write(serial_fd, &hs, 1);
+    usleep(100000);
+
+    printf("Serial init done (500000 baud, binary protocol).\n");
 }
 
+/* ── MT6701 I2C init ───────────────────────────────────────────── */
+static int mt6701_init(void) {
+    i2c_mt6701_fd = open("/dev/i2c-1", O_RDWR);
+    if (i2c_mt6701_fd < 0) {
+        perror("MT6701: open i2c");
+        return -1;
+    }
+    if (ioctl(i2c_mt6701_fd, I2C_SLAVE, MT6701_ADDR) < 0) {
+        perror("MT6701: set addr");
+        close(i2c_mt6701_fd);
+        i2c_mt6701_fd = -1;
+        return -1;
+    }
+    printf("MT6701 initialized on /dev/i2c-1 addr 0x%02X\n", MT6701_ADDR);
+    return 0;
+}
+
+/* Read 14-bit angle (0-16383) from MT6701. Returns -1 on error. */
+static int mt6701_read_angle(void) {
+    if (i2c_mt6701_fd < 0) return -1;
+    uint8_t reg = MT6701_ANGLE_H;
+    if (write(i2c_mt6701_fd, &reg, 1) != 1) return -1;
+    uint8_t buf[2];
+    if (read(i2c_mt6701_fd, buf, 2) != 2) return -1;
+    /* 14-bit angle: reg03[7:0] = bits 13..6, reg04[7:2] = bits 5..0 */
+    return ((uint16_t)buf[0] << 6) | (buf[1] >> 2);
+}
+
+/* ── Legacy I2C helpers (kept for GPIO expander compatibility) ── */
 void i2c_read_address(int file_i2c, unsigned char address, unsigned char *result)
 {
-
 	*result = address;
 	if (write(file_i2c, result, 1) != 1)
 	{
@@ -161,7 +185,6 @@ void dump_maps()
 
 int setupi2c(char *path, unsigned char address)
 {
-
 	int file = 0;
 
 	if ((file = open(path, O_RDWR)) < 0)
@@ -181,10 +204,8 @@ int setupi2c(char *path, unsigned char address)
 void AddNewMidiDevices(char mididevices[64][64], int mididevicenum)
 {
 	bool alreadyAdded;
-	// Search to see which devices we've already added
 	for (int devc = 0; devc < mididevicenum; devc++)
 	{
-
 		alreadyAdded = 0;
 
 		for (int controlc = 0; controlc < numControllers; controlc++)
@@ -233,14 +254,12 @@ void init_io()
 			// If pin is marked as ground
 			if (map != NULL && map->Action == ACTION_GND)
 			{
-				//printf("Grounding pin %d\n", i);
 				iodirs &= ~(0x0001 << i);
 			}
 
 			// If pin's pullup is disabled
 			if (map != NULL && !map->Pullup)
 			{
-				//printf("Disabling pin %d pullup\n", i);
 				pullups &= ~(0x0001 << i);
 			}
 			else printf ("Pulling up pin %d\n", i);
@@ -256,12 +275,6 @@ void init_io()
 		tmpchar = (unsigned char)((pullups >> 8) & 0xFF);
 		i2c_write_address(file_i2c_gpio, 0x0D, tmpchar);
 
-		/*printf("PULLUPS - B");
-		printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY((pullups >> 8) & 0xFF));
-		printf("A");
-		printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY((pullups & 0xFF)));
-		printf("\n");*/
-
 		// Bank A direction
 		tmpchar = (unsigned char)(iodirs & 0xFF);
 		i2c_write_address(file_i2c_gpio, 0x00, tmpchar);
@@ -269,12 +282,6 @@ void init_io()
 		// Bank B direction
 		tmpchar = (unsigned char)((iodirs >> 8) & 0xFF);
 		i2c_write_address(file_i2c_gpio, 0x01, tmpchar);
-
-		/*printf("IODIRS  - B");
-		printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY((iodirs >> 8) & 0xFF));
-		printf("A");
-		printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(iodirs & 0xFF));
-		printf("\n");*/
 	}
 
 	// Configure A13 GPIO
@@ -283,14 +290,12 @@ void init_io()
 	if (fd < 0)
 	{
 		fprintf(stderr, "Unable to open port\n\r");
-		//exit(fd);
 		mmappresent = 0;
 	}
 	gpio_addr = mmap(NULL, 65536, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0x01C20800 & 0xffff0000);
 	if (gpio_addr == MAP_FAILED)
 	{
 		fprintf(stderr, "Unable to open mmap\n\r");
-		//exit(fd);
 		mmappresent = 0;
 	}
 	gpio_addr += 0x0800;
@@ -313,17 +318,9 @@ void init_io()
 						map->Action = ACTION_NOTHING;
 					}
 					else {
-						//printf("Pulling %d %d %d\n", j, i, map->Pullup);
-						// which config register to use, 0-3
 						uint32_t configregister = i >> 3;
-
-						// which pull register to use, 0-1
 						uint32_t pullregister = i >> 4;
-
-						// how many bits to shift the config register
 						uint32_t configShift = (i % 8) * 4;
-
-						// how many bits to shift the pull register
 						uint32_t pullShift = (i % 16) * 2;
 
 						volatile uint32_t *PortConfigRegister = gpio_addr + (j * 0x24) + (configregister * 0x04);
@@ -331,14 +328,10 @@ void init_io()
 						uint32_t portConfig = *PortConfigRegister;
 						uint32_t portPull = *PortPullRegister;
 
-						// mask to unset the relevant pins in the registers
 						uint32_t configMask = ~(0b1111 << configShift);
 						uint32_t pullMask = ~(0b11 << pullShift);
 
-						// Set port as input
-						// portConfig = (portConfig & configMask) | (0b0000 << configShift); (not needed because input is 0 anyway)
 						portConfig = (portConfig & configMask);
-
 						portPull = (portPull & pullMask) | (map->Pullup << pullShift);
 						*PortConfigRegister = portConfig;
 						*PortPullRegister = portPull;
@@ -351,38 +344,22 @@ void init_io()
 }
 
 void process_io()
-{ // Iterate through all digital input mappings and check the appropriate pin
+{
 	unsigned int gpios = 0x00000000;
 	unsigned char result;
-	// if (gpiopresent)
-	// {
-	// 	i2c_read_address(file_i2c_gpio, 0x13, &result); // Read bank B
-	// 	gpios = ((unsigned int)result) << 8;
-	// 	//printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(result));
-	// 	i2c_read_address(file_i2c_gpio, 0x12, &result); // Read bank A
-	// 	gpios |= result;
-	// 	//printf(" - ");
-	// 	//printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(result));
-	// 	//printf("\n");
-
-	// 	// invert logic
-	// 	gpios ^= 0xFFFF;
-	// }
 	struct mapping *last_map = maps;
 	while (last_map != NULL)
 	{
-		//printf("arses : %d %d\n", last_map->port, last_map->Pin);
-
 		// Only digital pins
 		if (last_map->Type == MAP_IO && (!(last_map->port == 0 && !gpiopresent)))
 		{
 
 			bool pinVal = 0;
-			if (last_map->port == 0 && gpiopresent) // port 0, I2C GPIO expander
+			if (last_map->port == 0 && gpiopresent)
 			{
 				pinVal = (bool)((gpios >> last_map->Pin) & 0x01);
 			}
-			else if (mmappresent) // Ports 1-6, olimex GPIO
+			else if (mmappresent)
 			{
 				volatile uint32_t *PortDataReg = gpio_addr + (last_map->port * 0x24) + 0x10;
 				uint32_t PortData = *PortDataReg;
@@ -394,14 +371,6 @@ void process_io()
 				pinVal = 0;
 			}
 
-			// iodebounce = 0 when button not pressed,
-			// > 0 and < scsettings.debouncetime when debouncing positive edge
-			// > scsettings.debouncetime and < scsettings.holdtime when holding
-			// = scsettings.holdtime when continuing to hold
-			// > scsettings.holdtime when waiting for release
-			// > -scsettings.debouncetime and < 0 when debouncing negative edge
-
-			// Button not pressed, check for button
 			if (last_map->debounce == 0)
 			{
 				if (pinVal)
@@ -418,35 +387,26 @@ void process_io()
 						if ((!shifted && last_map->Edge == 1) || (shifted && last_map->Edge == 3))
 							IOevent(last_map, NULL);
 
-						// start the counter
 						last_map->debounce++;
 					}
 				}
 			}
-
-			// Debouncing positive edge, increment value
 			else if (last_map->debounce > 0 && last_map->debounce < scsettings.debouncetime)
 			{
 				last_map->debounce++;
 			}
-
-			// debounce finished, keep incrementing until hold reached
 			else if (last_map->debounce >= scsettings.debouncetime && last_map->debounce < scsettings.holdtime)
 			{
-				// check to see if unpressed
 				if (!pinVal)
 				{
 					printf("Button %d released\n", last_map->Pin);
 					if (last_map->Edge == 0)
 						IOevent(last_map, NULL);
-					// start the counter
 					last_map->debounce = -scsettings.debouncetime;
 				}
-
 				else
 					last_map->debounce++;
 			}
-			// Button has been held for a while
 			else if (last_map->debounce == scsettings.holdtime)
 			{
 				printf("Button %d-%d held\n", last_map->port, last_map->Pin);
@@ -454,31 +414,24 @@ void process_io()
 					IOevent(last_map, NULL);
 				last_map->debounce++;
 			}
-
-			// Button still holding, check for release
 			else if (last_map->debounce > scsettings.holdtime)
 			{
 				if (pinVal)
 				{
 					if (last_map->Action == ACTION_VOLUHOLD || last_map->Action == ACTION_VOLDHOLD)
 					{
-						// keep running the vol up/down actions if they're held
 						if ((!shifted && last_map->Edge == 2) || (shifted && last_map->Edge == 4))
 							IOevent(last_map, NULL);
 					}
 				}
-				// check to see if unpressed
 				else
 				{
 					printf("Button %d released\n", last_map->Pin);
 					if (last_map->Edge == 0)
 						IOevent(last_map, NULL);
-					// start the counter
 					last_map->debounce = -scsettings.debouncetime;
 				}
 			}
-
-			// Debouncing negative edge, increment value - will reset when zero is reached
 			else if (last_map->debounce < 0)
 			{
 				last_map->debounce++;
@@ -498,7 +451,7 @@ void process_io()
 
 int file_i2c_rot, file_i2c_pic;
 
-int pitchMode = 0; // If we're in pitch-change mode
+int pitchMode = 0;
 int oldPitchMode = 0;
 bool capIsTouched = 0;
 unsigned char buttons[4] = {0, 0, 0, 0}, totalbuttons[4] = {0, 0, 0, 0};
@@ -507,81 +460,147 @@ unsigned char buttonState = 0;
 unsigned int butCounter = 0;
 unsigned char faderOpen1 = 0, faderOpen2 = 0;
 
-#define BUFFER_SIZE 256
-char read_buffer[BUFFER_SIZE];
-char line_buffer[BUFFER_SIZE];
-int line_index = 0;
+/* ── Cue button state ──────────────────────────────────────────── */
+static uint8_t last_button_byte = 0;
+static unsigned long cue_press_time[4] = {0, 0, 0, 0};
+#define CUE_LONG_PRESS_MS 1000
+int cue_display_states[4] = {CUE_STATE_EMPTY, CUE_STATE_EMPTY,
+                              CUE_STATE_EMPTY, CUE_STATE_EMPTY};
 
-void read_serial_data() {
-    int bytes_read = read(serial_fd, read_buffer, sizeof(read_buffer) - 1);
+/* ── Cue button processing ─────────────────────────────────────── */
+static unsigned long millis_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
 
-    if (bytes_read > 0) {
-        read_buffer[bytes_read] = '\0'; // Null-terminate the string
+void process_cue_buttons(uint8_t button_byte) {
+    unsigned long now = millis_now();
 
-        for (int i = 0; i < bytes_read; i++) {
-            if (read_buffer[i] == '\n') {
-                // Process complete line
-                line_buffer[line_index] = '\0';
-                line_index = 0;
-				float curveSwitch;
-				bool switchFader = false;
-				get_variable_value("Fad Switch", &curveSwitch);
-				if(curveSwitch > 0.5) { switchFader = true; }
+    for (int i = 0; i < 4; i++) {
+        int cur = (button_byte >> i) & 1;
+        int prev = (last_button_byte >> i) & 1;
 
-                // Parse the fader and encoder values
-                int fader_value, encoder_value, capacitive_value;
-                if (sscanf(line_buffer, "%d %d %d", &fader_value, &encoder_value, &capacitive_value) == 3) {
-					ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
-					ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
-					ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
-					ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
-					capIsTouched = 0;
-					encoder_value = 4096 - encoder_value;
+        /* Rising edge - button pressed */
+        if (cur && !prev) {
+            cue_press_time[i] = now;
+        }
 
-					if (capacitive_value > 5000) {
-						capIsTouched = 1; // Set touched if capacitance exceeds threshold
-					} 
-                    // printf("Fader: %d, Encoder: %d Capcitative: %d Touched: %d diff: %d\n", ADCs[0], encoder_value, capacitive_value, capIsTouched,  (abs(encoder_value - deck[1].newEncoderAngle) > )  );
-
-                    deck[1].newEncoderAngle = encoder_value;
-                } else {
-                    printf("Malformed line: %s\n", line_buffer);
-                }
+        /* Falling edge - button released */
+        if (!cur && prev) {
+            unsigned long held = now - cue_press_time[i];
+            if (held >= CUE_LONG_PRESS_MS) {
+                /* Long press: set cue at current position (overwrite) */
+                cues_set(&deck[1].cues, i, player_get_elapsed(&deck[1].player));
+                if (deck[1].player.track && deck[1].player.track->path)
+                    cues_save_to_file(&deck[1].cues, deck[1].player.track->path);
+                cue_display_states[i] = CUE_STATE_SET;
+                printf("Cue %d set\n", i + 1);
             } else {
-                // Accumulate data in the line buffer
-                if (line_index < sizeof(line_buffer) - 1) {
-                    line_buffer[line_index++] = read_buffer[i];
+                /* Short press: jump to cue if set */
+                double pos = cues_get(&deck[1].cues, i);
+                if (pos != CUE_UNSET) {
+                    player_seek_to(&deck[1].player, pos);
+                    cue_display_states[i] = CUE_STATE_ACTIVE;
+                    printf("Cue %d triggered\n", i + 1);
                 }
             }
         }
+
+        /* Long-press feedback while held */
+        if (cur && cue_press_time[i] > 0 &&
+            (now - cue_press_time[i]) >= CUE_LONG_PRESS_MS) {
+            cue_display_states[i] = CUE_STATE_ACTIVE;
+        }
+    }
+
+    last_button_byte = button_byte;
+}
+
+/* ── Binary serial read (ring buffer with sync byte scanning) ── */
+static void read_serial_data(void) {
+    static uint8_t ring[256];
+    static int rpos = 0, wpos = 0;
+
+    /* Fill ring buffer */
+    uint8_t tmp[64];
+    int n = read(serial_fd, tmp, sizeof(tmp));
+    if (n > 0) {
+        for (int i = 0; i < n; i++)
+            ring[wpos++ & 0xFF] = tmp[i];
+    }
+
+    /* Scan for valid packets (7 bytes: SYNC fHi fLo cHi cLo buttons checksum) */
+    int avail = (wpos - rpos) & 0xFF;
+    while (avail >= PKT_LEN) {
+        if (ring[rpos & 0xFF] != SYNC_BYTE) {
+            rpos++; avail--; continue;
+        }
+
+        uint8_t p[PKT_LEN];
+        for (int i = 0; i < PKT_LEN; i++)
+            p[i] = ring[(rpos + i) & 0xFF];
+
+        uint8_t chk = p[1] ^ p[2] ^ p[3] ^ p[4] ^ p[5];
+        if (chk == p[6]) {
+            int fader_value = (p[1] << 8) | p[2];
+            int cap_value   = (p[3] << 8) | p[4];
+            uint8_t btn     = p[5];
+
+            /* Process fader */
+            float curveSwitch;
+            bool switchFader = false;
+            get_variable_value("Fad Switch", &curveSwitch);
+            if (curveSwitch > 0.5) switchFader = true;
+
+            ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
+            ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
+            ADCs[2] = switchFader ? fader_value : (1023 - fader_value);
+            ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
+
+            /* Process capacitive touch */
+            capIsTouched = (cap_value > 5000) ? 1 : 0;
+
+            /* Process cue buttons (edge detection) */
+            process_cue_buttons(btn);
+
+            rpos += PKT_LEN;
+            avail = (wpos - rpos) & 0xFF;
+        } else {
+            rpos++; avail--;
+        }
     }
 }
+
+/* ── Read MT6701 angle and set deck encoder ────────────────────── */
+static void read_mt6701_angle(void) {
+    int angle = mt6701_read_angle();
+    if (angle >= 0) {
+        deck[1].newEncoderAngle = angle;
+    }
+}
+
 void process_pic()
 {
     if (ADCs[0] < 0) ADCs[0] = 0;
     if (ADCs[0] > 1023) ADCs[0] = 1023;
 
-    double fader = ADCs[0] / 1023.0; // Normalize fader to range [0, 1]
+    double fader = ADCs[0] / 1023.0;
 	float curveFactor;
     get_variable_value("Fad Factor", &curveFactor);
 	float curvePower;
     get_variable_value("Fad Power", &curvePower);
 
     if (fader <= 0.5) {
-        // Left side: Deck 0 stays at full volume, Deck 1 fades in
         deck[1].player.faderTarget = 1.0;
-        deck[0].player.faderTarget = pow(fader / curveFactor, curvePower); // Use curveFactor to shift the transition
+        deck[0].player.faderTarget = pow(fader / curveFactor, curvePower);
     } else {
-        // Right side: Deck 1 stays at full volume, Deck 0 fades in
-        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower); // Use curveFactor to shift the transition
+        deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower);
         deck[0].player.faderTarget = 1.0;
     }
 
-    // Ensure faderTarget does not exceed bounds
     if (deck[0].player.faderTarget > 1.0) deck[0].player.faderTarget = 1.0;
     if (deck[1].player.faderTarget > 1.0) deck[1].player.faderTarget = 1.0;
-
-	//printf("%d %d %d %d", fadertarget0,fadertarget1,deck[0].player.setVolume,deck[1].player.setVolume);
 }
 
 // Keep a running average of speed so if we suddenly let go it keeps going at that speed
@@ -589,32 +608,27 @@ double averageSpeed = 0.0;
 unsigned int numBlips = 0;
 void process_rot()
 {
-	int8_t crossedZero; // 0 when we haven't crossed zero, -1 when we've crossed in anti-clockwise direction, 1 when crossed in clockwise
+	int8_t crossedZero;
 	int wrappedAngle = 0x0000;
-	// Handle rotary sensor
 
 	if (scsettings.jogReverse) {
-		//printf("%d,",deck[1].newEncoderAngle);
-		deck[1].newEncoderAngle = 4095 - deck[1].newEncoderAngle;
-		//printf("%d\n",deck[1].newEncoderAngle);
+		deck[1].newEncoderAngle = (ENCODER_CPR - 1) - deck[1].newEncoderAngle;
 	}
 
 	// First time, make sure there's no difference
 	if (deck[1].encoderAngle == 0xffff)
 		deck[1].encoderAngle = deck[1].newEncoderAngle;
 
-	// Handle wrapping at zero
-
-	if (deck[1].newEncoderAngle < 1024 && deck[1].encoderAngle >= 3072)
-	{ // We crossed zero in the positive direction
-
+	// Handle wrapping at zero (14-bit: quarter = CPR/4)
+	if (deck[1].newEncoderAngle < (ENCODER_CPR / 4) && deck[1].encoderAngle >= (ENCODER_CPR * 3 / 4))
+	{
 		crossedZero = 1;
-		wrappedAngle = deck[1].encoderAngle - 4096;
+		wrappedAngle = deck[1].encoderAngle - ENCODER_CPR;
 	}
-	else if (deck[1].newEncoderAngle >= 3072 && deck[1].encoderAngle < 1024)
-	{ // We crossed zero in the negative direction
+	else if (deck[1].newEncoderAngle >= (ENCODER_CPR * 3 / 4) && deck[1].encoderAngle < (ENCODER_CPR / 4))
+	{
 		crossedZero = -1;
-		wrappedAngle = deck[1].encoderAngle + 4096;
+		wrappedAngle = deck[1].encoderAngle + ENCODER_CPR;
 	}
 	else
 	{
@@ -622,9 +636,7 @@ void process_rot()
 		wrappedAngle = deck[1].encoderAngle;
 	}
 
-	// rotary sensor sometimes returns incorrect values, if we skip more than threshold ignore that value
-	// If we see 3 blips in a row, then I guess we better accept the new value
-	// Threshold is configurable via the "blipthreshold" shared variable (Config Menu → Global Settings)
+	// Blip threshold (configurable, needs 4x increase for 14-bit vs 12-bit)
 	float blipthreshold;
 	get_variable_value("blipthreshold", &blipthreshold);
 	if (abs(deck[1].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
@@ -638,46 +650,36 @@ void process_rot()
 
 		if (pitchMode)
 		{
-
 			if (!oldPitchMode)
-			{ // We just entered pitchmode, set offset etc
-
+			{
 				deck[(pitchMode - 1)].player.note_pitch = 1.0;
 				deck[1].angleOffset = -deck[1].encoderAngle;
 				oldPitchMode = 1;
 				deck[1].player.capTouch = 0;
 			}
 
-			// Handle wrapping at zero
-
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += 4096;
+				deck[1].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= 4096;
+				deck[1].angleOffset -= ENCODER_CPR;
 			}
 
-			// Use the angle of the platter to control sample pitch
-			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / 16384) + 1.0;
+			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
 		}
 		else
 		{
-
 			if (scsettings.platterenabled)
 			{
-				// Handle touch sensor
 				if (capIsTouched || deck[1].player.motor_speed == 0.0)
 				{
-
-					// Positive touching edge
 					if (!deck[1].player.capTouch || oldPitchMode && !deck[1].player.stopped)
 					{
 						float platterspeed;
 						get_variable_value("platterspeed", &platterspeed);
 						deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
-						// printf("touch!\n");
 						deck[1].player.target_position = deck[1].player.position;
 						deck[1].player.capTouch = 1;
 					}
@@ -687,39 +689,22 @@ void process_rot()
 					deck[1].player.capTouch = 0;
 				}
 			}
-
 			else
 				deck[1].player.capTouch = 1;
 
-			/*if (deck[1].player.capTouch) we always want to dump the target position so we can do lasers etc
-			{*/
-
-			// Handle wrapping at zero
-
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += 4096;
+				deck[1].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= 4096;
+				deck[1].angleOffset -= ENCODER_CPR;
 			}
 
-			// Convert the raw value to track position and set player to that pos
 				float platterspeed;
 			get_variable_value("platterspeed", &platterspeed);
 			deck[1].player.target_position = (double)(deck[1].encoderAngle + deck[1].angleOffset) / platterspeed;
-			// printf("blip! %d %d %d\n", deck[1].newEncoderAngle, deck[1].encoderAngle, deck[1].player.target_position);
-
-			// Loop when track gets to end
-
-			/*if (deck[1].player.target_position > ((double)deck[1].player.track->length / (double)deck[1].player.track->rate))
-					{
-						deck[1].player.target_position = 0;
-						angleOffset = encoderAngle;
-					}*/
 		}
-		//}
 		oldPitchMode = pitchMode;
 	}
 }
@@ -733,26 +718,15 @@ void *SC_InputThread(void *ptr)
 	char mididevices[64][64];
 	int mididevicenum = 0, oldmididevicenum = 0;
 
-	// Initialise rotary sensor on I2C0
+	/* Init serial (binary protocol, 500k baud) */
+	init_serial(SERIAL_DEV);
 
-	// if ((file_i2c_rot = setupi2c("/dev/i2c-0", 0x36)) < 0)
-	// {
-	// 	printf("Couldn't init rotary sensor\n");
-	// 	//rotarypresent = 0;
-	// }
+	/* Init MT6701 hall sensor on I2C */
+	if (mt6701_init() < 0) {
+		printf("Warning: MT6701 not available, platter disabled\n");
+	}
 
-	// // Initialise PIC input processor on I2C2
-
-	// if ((file_i2c_pic = setupi2c("/dev/i2c-2", 0x69)) < 0)
-	// {
-	// 	printf("Couldn't init input processor\n");
-	// 	picpresent = 0;
-	// }
-	
-	init_serial("/dev/serial0");
-	// init_io();
-
-	srand(time(NULL)); // TODO - need better entropy source, SoC is starting up annoyingly deterministically
+	srand(time(NULL));
 
 	struct timeval tv;
 	unsigned long lastTime = 0;
@@ -760,18 +734,16 @@ void *SC_InputThread(void *ptr)
 	struct timespec ts;
 	double inputtime = 0, lastinputtime = 0;
 
-
 	int secondCount = 0;
 	deck[0].player.volume = 0.5;
 			deck[1].player.capTouch = 0;
 			deck[1].player.faderTarget = 0.5;
-			
+
 			deck[0].player.faderTarget = 0.5;
 			deck[0].player.justPlay = 0;
 			deck[0].player.pitch = 1;
 
 		deck_random_file(&deck[0]);
-		// deck_random_file(&deck[1]);
 
 	while (1) // Main input loop
 	{
@@ -783,35 +755,14 @@ void *SC_InputThread(void *ptr)
 		if (tv.tv_sec != lastTime)
 		{
 			lastTime = tv.tv_sec;
-			// printf("\033[H\033[J"); // Clear Screen
-			// printf("\nFPS: %06u - ADCS: %04u, %04u, %04u, %04u, %04u\nButtons: %01u,%01u,%01u,%01u,%01u\nTP: %f, P : %f\n\nTP: %f, P : %f\n%f -- %f\n",
-			// 	   frameCount, ADCs[0], ADCs[1], ADCs[2], ADCs[3], deck[1].encoderAngle,
-			// 	   buttons[0], buttons[1], buttons[2], buttons[3], capIsTouched,
-			// 	   deck[0].player.target_position, deck[0].player.position,
-			// 	   deck[1].player.target_position, deck[1].player.position,					
-			// 	   deck[0].player.volume, deck[1].player.volume);
-			
-			//dump_maps();
-
-			//printf("\nFPS: %06u\n", frameCount);
 			frameCount = 0;
 
-			// list midi devices
-			// for (int cunt = 0; cunt < numControllers; cunt++)
-			// {
-			// 	printf("MIDI : %s\n", ((struct dicer *)(midiControllers[cunt].local))->PortName);
-			// }
-
-			// Wait 10 seconds to enumerate MIDI devices
-			// Give them a little time to come up properly
 			if (secondCount < scsettings.mididelay)
 				secondCount++;
 			else if (secondCount == scsettings.mididelay)
 			{
-				// Check for new midi devices
 				mididevicenum = listdev("rawmidi", mididevices);
 
-				// If there are more MIDI devices than last time, add them
 				if (mididevicenum > oldmididevicenum)
 				{
 					AddNewMidiDevices(mididevices, mididevicenum);
@@ -821,10 +772,12 @@ void *SC_InputThread(void *ptr)
 			}
 		}
 
-		// Get info from input processor registers
-		// First the ADC values
-		// 5 = XFADER1, 6 = XFADER2, 7 = POT1, 8 = POT2
+		/* Read serial data (fader + cap + buttons) */
 		read_serial_data();
+
+		/* Read MT6701 angle (replaces Arduino encoder) */
+		read_mt6701_angle();
+
 		picpresent = 1;
 
 process_pic();
@@ -835,16 +788,16 @@ process_pic();
 			if (picskip > 4)
 			{
 				picskip = 0;
-				
+
 				firstTimeRound = 0;
 			}
 
 		}
-		else // couldn't find input processor, just play the tracks
+		else
 		{
 			deck[1].player.capTouch = 1;
 			deck[1].player.faderTarget = 0.5;
-			
+
 			deck[0].player.faderTarget = 0.5;
 			deck[0].player.justPlay = 1;
 			deck[0].player.pitch = 1;
@@ -867,7 +820,6 @@ process_pic();
 // Start the input thread
 void SC_Input_Start()
 {
-
 	pthread_t thread1;
 	const char *message1 = "Thread 1";
 	int iret1;

@@ -62,6 +62,17 @@ SC_SETTINGS scsettings;
 
 struct mapping *maps = NULL;
 
+/* Editable variables (registered with shared_variables system) */
+float input_curveFactor = 0.1f;
+float input_curvePower = 0.2f;
+float input_curveSwitch = 1.0f;
+float slippiness = 200.f;
+float brakespeed = 3000.f;
+float platterspeed = 3072.0f;
+float target_pitch = 15.0f;
+float blipthreshold = 400.0f;
+float pitch_filter = 0.1f;
+
 unsigned int countChars(char *string, char c)
 {
 	unsigned int count = 0;
@@ -111,7 +122,7 @@ void loadSettings()
 	scsettings.initialVolume = 0.125;
 	scsettings.midiRemapped = 0;
 	scsettings.ioRemapped = 0;
-	scsettings.jogReverse = 0;
+	scsettings.jogReverse = 1;
 	scsettings.cutbeats = 0;
 
 	// later we'll check for sc500 pin and use it to set following settings
@@ -359,15 +370,6 @@ int main(int argc, char *argv[])
 	deck_load_folder(&deck[0], "/home/no3z/beats");
 	deck_load_folder(&deck[1], "/home/no3z/samples");	
 
-	float input_curveFactor = 0.1f;
-	float input_curvePower = 0.2f;
-	float input_curveSwitch = 1.0f;
-	float slippiness = 200.f;
-	float brakespeed = 3000.f;
-	float platterspeed = 3072.0f;
-	float target_pitch = 15.0f; //10 for a 1024 buffer size
-	float blipthreshold = 400.0f; // Max angle change per frame before filtering (encoder glitch rejection)
-	float pitch_filter = 0.1f; // Pitch low-pass filter alpha (0.0=very smooth/laggy, 1.0=instant/noisy)
 	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
     register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);

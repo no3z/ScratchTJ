@@ -1,277 +1,201 @@
 #include <stdio.h>
-#include <wiringPi.h>
 #include "lcd_menu.h"
 #include "deck.h"
 #include "main_menu.h"
-#include <stdio.h>
 #include <stdlib.h>
-#include <linux/i2c-dev.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
+#include "sc_input.h"
+#include "cues.h"
 
 #define ROTARY_DEBOUNCE_DELAY 5
-#define LONG_PRESS_DELAY 2000
 
-// I2C LCD Address (adjust if needed, use `i2cdetect` to find address)
-#define I2C_ADDR 0x27
-
-// LCD Commands
-#define LCD_CMD 0
-#define LCD_CHR 1
-#define LCD_BACKLIGHT 0x08
-#define ENABLE 0x04
-#define LCD_LINE_1 0x80  // First line
-#define LCD_LINE_2 0xC0  // Second line
-// Globals for I2C LCD and Rotary Encoder
-int lcdHandle;  // I2C LCD Handle
+/* Globals */
 static struct deck **decks;
 static int deck_count;
 bool needsUpdate = true;
-MainMenuState mainMenuState = MENU_MAIN;
+MainMenuState mainMenuState = MENU_HOME;
 
-static unsigned long lastTurnTime = 0;
 static unsigned long lastButtonPressTime = 0;
-static bool longPressHandled = false;
 
+/* Auto-return and home screen refresh timers */
+static unsigned long lastActivityTime = 0;
+static unsigned long lastHomeRedrawTime = 0;
+#define HOME_REDRAW_INTERVAL_MS  100
+#define AUTO_RETURN_TIMEOUT_MS  10000
 
-// Function Prototypes
-void lcd_byte(int bits, int mode);
-void lcd_init();
-void lcd_string(const char *message, int line);
-
-void lcd_byte(int bits, int mode) {
-    char high_bits = mode | (bits & 0xF0) | LCD_BACKLIGHT;
-    char low_bits = mode | ((bits << 4) & 0xF0) | LCD_BACKLIGHT;
-
-    // Write high nibble
-    if (write(lcdHandle, &high_bits, 1) != 1) {
-        fprintf(stderr, "Error writing high nibble\n");
-        exit(1);
-    }
-    lcd_toggle_enable(high_bits);
-
-    // Write low nibble
-    if (write(lcdHandle, &low_bits, 1) != 1) {
-        fprintf(stderr, "Error writing low nibble\n");
-        exit(1);
-    }
-    lcd_toggle_enable(low_bits);
+static unsigned long menu_millis(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (unsigned long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
-
-void lcd_toggle_enable(char bits) {
-    usleep(500); // Delay to ensure proper timing
-    char enable_bits = bits | ENABLE;
-    if (write(lcdHandle, &enable_bits, 1) != 1) {
-        fprintf(stderr, "Error toggling ENABLE\n");
-        exit(1);
-    }
-    usleep(500); // Enable pulse width
-    enable_bits = bits & ~ENABLE;
-    if (write(lcdHandle, &enable_bits, 1) != 1) {
-        fprintf(stderr, "Error resetting ENABLE\n");
-        exit(1);
-    }
-    usleep(500); // Delay after toggling
-}
-
-void lcd_init() {
-    lcd_byte(0x33, LCD_CMD); // Initialize
-    lcd_byte(0x32, LCD_CMD); // Set to 4-bit mode
-    lcd_byte(0x06, LCD_CMD); // Cursor move direction
-    lcd_byte(0x0C, LCD_CMD); // Turn cursor off
-    lcd_byte(0x28, LCD_CMD); // 2-line display, 5x8 dots
-    lcd_byte(0x01, LCD_CMD); // Clear display
-    usleep(2000);            // Delay for clear command
-}
-// Write a string to the LCD
-void lcd_string(const char *message, int line) {
-    lcd_byte(line, LCD_CMD);
-    for (int i = 0; message[i] != '\0'; i++) {
-        lcd_byte(message[i], LCD_CHR);
-    }
-}
-
-
-void lcdClear(int handle) {
-    lcd_byte(0x01, LCD_CMD); // Clear display
-    usleep(2000);            // Delay for clear command
-}
-
-void lcdPuts(int handle, const char *string) {    
-    fprintf(stderr, "Printing: %s\n", string);
-    for (int i = 0; string[i] != '\0'; i++) {
-        // fprintf(stderr, "Char: %c (%02X)\n", string[i], string[i]);
-        lcd_byte(string[i], LCD_CHR);
-    }
-}
-
-void lcdPosition(int handle, int col, int row) {
-    int address;
-
-    // Calculate the address based on row and column
-    switch (row) {
-        case 0: address = 0x80 + col; break; // Line 1
-        case 1: address = 0xC0 + col; break; // Line 2
-        // case 2: address = 0x94 + col; break; // Line 3 (if applicable)
-        // case 3: address = 0xD4 + col; break; // Line 4 (if applicable)
-        default:
-            fprintf(stderr, "Invalid row: %d\n", row);
-            return;
-    }
-
-    // Send the calculated address as a command to the LCD
-    lcd_byte(address, LCD_CMD);
-}
-
-void lcdPrintf(int handle, const char *format, ...) {
-    char buffer[64];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    va_end(args);
-    lcdPuts(0,buffer);
-}
-
-void lcd_set_cursor(int line, int position) {
-    int address = (line == 1 ? LCD_LINE_1 : LCD_LINE_2) + position;
-    lcd_byte(address, LCD_CMD);
-}
-
 
 void lcd_menu_init(struct deck *deck_array[], int count) {
-    if (wiringPiSetupGpio() == -1) {
+    if (gpio_direct_init() < 0) {
         fprintf(stderr, "Couldn't initialize GPIO\n");
         exit(1);
     }
 
-    lcdHandle = open("/dev/i2c-1", O_RDWR);
-    if (lcdHandle < 0) {
-        fprintf(stderr, "Error opening I2C device\n");
-        exit(1);
-    }                 
-
-    // Set I2C slave address
-    if (ioctl(lcdHandle, I2C_SLAVE, I2C_ADDR) < 0) {
-        fprintf(stderr, "Error setting I2C address\n");
+    /* Initialize display */
+    if (oled_init() < 0) {
+        fprintf(stderr, "Error initializing display\n");
         exit(1);
     }
 
-    pinMode(ROTARY_CLK, INPUT);
-    pinMode(ROTARY_DT, INPUT);
-    pinMode(ROTARY_SW, INPUT);
-    pullUpDnControl(ROTARY_SW, PUD_UP);
-    lcd_init();
-    printf("LCD menu initialized.\n");
+    /* Setup encoder pins */
+    gpio_set_input(ROTARY_CLK);
+    gpio_set_input(ROTARY_DT);
+    gpio_set_input(ROTARY_SW);
+    gpio_set_input(ROTARY_KO);
+    gpio_set_pullup(ROTARY_CLK);
+    gpio_set_pullup(ROTARY_DT);
+    gpio_set_pullup(ROTARY_SW);
+    gpio_set_pullup(ROTARY_KO);
+
+    printf("TFT menu initialized.\n");
 
     decks = deck_array;
     deck_count = count;
 
+    lastActivityTime = menu_millis();
     display_main_menu(decks, deck_count);
 }
 
-
-// Poll encoder and update display if needed
+/* Poll encoder and update display if needed */
 void poll_rotary_encoder() {
+    unsigned long now = menu_millis();
+
+    /* Update cue bar overlay with deck 2 cue data */
+    if (deck_count >= 2) {
+        double cue_positions[4];
+        for (int i = 0; i < 4; i++)
+            cue_positions[i] = cues_get(&decks[1]->cues, i);
+        oled_set_cue_overlay(cue_display_states, cue_positions);
+    }
+
     handle_main_menu_navigation(decks, deck_count);
+
+    /* Auto-return to home after inactivity */
+    if (mainMenuState != MENU_HOME &&
+        (now - lastActivityTime) >= AUTO_RETURN_TIMEOUT_MS) {
+        mainMenuState = MENU_HOME;
+        needsUpdate = true;
+    }
+
+    /* Periodic redraw for home screen (live data at ~10fps) */
+    if (mainMenuState == MENU_HOME &&
+        (now - lastHomeRedrawTime) >= HOME_REDRAW_INTERVAL_MS) {
+        lastHomeRedrawTime = now;
+        needsUpdate = true;
+    }
+
     if (needsUpdate) {
         display_main_menu(decks, deck_count);
         needsUpdate = false;
     }
 }
 
-// Detects rotary encoder movement, returns 1 for CW, -1 for CCW, 0 for no movement
-// Uses a full quadrature state table to track all 4 transitions per detent.
-// Accumulates sub-steps and only reports a move when a full detent (4 edges) is completed,
-// which provides reliable debouncing and avoids phantom steps from contact bounce.
+/* Detects rotary encoder movement, returns 1 for CW, -1 for CCW, 0 for no movement.
+ * Uses a full quadrature state table to track all 4 transitions per detent.
+ * Accumulates sub-steps and only reports a move when a full detent (4 edges)
+ * is completed, providing reliable debouncing. */
 int rotary_encoder_moved() {
-    // Full quadrature state transition table: [lastState][currentState] = direction
-    // +1 = CW step, -1 = CCW step, 0 = no valid transition or same state
     static const int8_t transition_table[4][4] = {
-        //  00   01   10   11  <- current
-        {   0,  -1,   1,   0 }, // last = 00
-        {   1,   0,   0,  -1 }, // last = 01
-        {  -1,   0,   0,   1 }, // last = 10
-        {   0,   1,  -1,   0 }, // last = 11
+        /*  00   01   10   11  <- current */
+        {   0,  -1,   1,   0 }, /* last = 00 */
+        {   1,   0,   0,  -1 }, /* last = 01 */
+        {  -1,   0,   0,   1 }, /* last = 10 */
+        {   0,   1,  -1,   0 }, /* last = 11 */
     };
 
     static int lastState = -1;
     static int accumulator = 0;
 
-    int clk = digitalRead(ROTARY_CLK);
-    int dt = digitalRead(ROTARY_DT);
+    int clk = gpio_read(ROTARY_CLK);
+    int dt = gpio_read(ROTARY_DT);
     int currentState = (clk << 1) | dt;
 
-    // Initialize on first call
     if (lastState == -1) {
         lastState = currentState;
         return 0;
     }
 
-    if (currentState == lastState) return 0; // No change
+    if (currentState == lastState) return 0;
 
     int direction = transition_table[lastState][currentState];
     lastState = currentState;
 
-    if (direction == 0) return 0; // Invalid transition (noise), ignore
+    if (direction == 0) return 0;
 
     accumulator += direction;
 
-    // Most mechanical encoders have 4 state changes per detent (click).
-    // Only report a step when a full detent is completed.
     if (accumulator >= 4) {
         accumulator = 0;
-        return 1;  // CW
+        lastActivityTime = menu_millis();
+        return 1;  /* CW */
     } else if (accumulator <= -4) {
         accumulator = 0;
-        return -1; // CCW
+        lastActivityTime = menu_millis();
+        return -1; /* CCW */
     }
 
-    return 0; // Partial movement, not a full detent yet
+    return 0;
 }
 
-// Detects rotary button press: 1 for short press, 2 for long press, 0 for no press
+/* Detects rotary button click: 1 on release, 0 otherwise (back button) */
 int rotary_button_pressed() {
-    bool buttonState = digitalRead(ROTARY_SW) == LOW;
-    unsigned long currentPressTime = millis();
+    bool buttonState = gpio_read(ROTARY_SW) == 0; /* active low */
 
     if (buttonState) {
-        if (lastButtonPressTime == 0) lastButtonPressTime = currentPressTime;
-
-        if (currentPressTime - lastButtonPressTime >= LONG_PRESS_DELAY && !longPressHandled) {
-            longPressHandled = true;
-            return 2;  // Long press detected
-        }
+        if (lastButtonPressTime == 0) lastButtonPressTime = gpio_millis();
     } else {
-        if (lastButtonPressTime > 0 && currentPressTime - lastButtonPressTime < LONG_PRESS_DELAY) {
+        if (lastButtonPressTime > 0) {
             lastButtonPressTime = 0;
-            longPressHandled = false;
-            return 1;  // Short press detected
+            lastActivityTime = menu_millis();
+            return 1;  /* click = back */
         }
-        lastButtonPressTime = 0;
-        longPressHandled = false;
     }
     return 0;
 }
+
+/* KB0 button (GPIO17): 1 on release (select/enter), 0 otherwise */
+int kb0_button_pressed() {
+    static unsigned long kb0PressTime = 0;
+
+    bool pressed = gpio_read(ROTARY_KO) == 0;  /* active low */
+
+    if (pressed) {
+        if (kb0PressTime == 0) kb0PressTime = gpio_millis();
+    } else {
+        if (kb0PressTime > 0) {
+            kb0PressTime = 0;
+            lastActivityTime = menu_millis();
+            return 1;  /* click = select */
+        }
+    }
+    return 0;
+}
+
 void trigger_io_event(unsigned char action, unsigned char deckNo, unsigned char param) {
-    struct mapping temp_map = {0}; // Temporary mapping structure
+    struct mapping temp_map = {0};
     temp_map.Action = action;
     temp_map.DeckNo = deckNo;
-    temp_map.Type = MAP_IO; // Assuming it's an I/O event type, not MIDI
-    temp_map.Param = param; // Set the volume as a parameter
-
-    IOevent(&temp_map, NULL); // Call IOevent with generated mapping and NULL MidiBuffer
+    temp_map.Type = MAP_IO;
+    temp_map.Param = param;
+    IOevent(&temp_map, NULL);
 }
 
-void trigger_io_event_no_param(unsigned char action, unsigned char deckNo){
-    unsigned char defaultVolume = 64; // Example default value
+void trigger_io_event_no_param(unsigned char action, unsigned char deckNo) {
+    unsigned char defaultVolume = 64;
     trigger_io_event(action, deckNo, defaultVolume);
 }
+
 void* rotary_encoder_thread(void* arg) {
     while (true) {
         poll_rotary_encoder();
-        usleep(5000); // Poll every 5ms (200Hz) - fast enough to catch all encoder transitions
+        usleep(5000); /* Poll every 5ms (200Hz) */
     }
     return NULL;
 }

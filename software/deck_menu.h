@@ -26,6 +26,7 @@ typedef struct {
 // Main display and navigation functions
 void display_deck_menu(struct deck *d, int deck_no);
 void handle_deck_menu_navigation(struct deck *d, int deckno);
+void deck_menu_reset(void);
 
 // Menu navigation and display helpers
 void display_menu(MenuItem *menuItems, int menuSize, int selectedItem, const char *title);
