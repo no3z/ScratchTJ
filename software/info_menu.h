@@ -12,5 +12,6 @@ void toggle_info_menu_state();
 float get_cpu_usage();
 int get_memory_usage();
 void handle_info_menu_navigation();
+void enter_info_submenu();
 
 #endif
