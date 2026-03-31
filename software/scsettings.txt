@@ -27,10 +27,12 @@ faderclosepoint=3
 platterenabled=1
 
 # Ratio of platter movement to sample movement
-# 4096 = 1 second for every platter rotation
-# 3072 = equivalent to 45rpm record (default)
-# 2275 = equivalent to 33rpm
-platterspeed=2275
+# For 14-bit MT6701 (CPR=16384):
+#   16384 = 1 second for every platter rotation
+#   12288 = equivalent to 45rpm record
+#   9100  = equivalent to 33rpm (default)
+# For original SC1000 12-bit (CPR=4096): multiply above by 0.25
+platterspeed=9100
 
 # How long the stop button takes to stop the track
 # Higher is longer, default = 3000

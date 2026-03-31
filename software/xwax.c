@@ -68,7 +68,7 @@ float input_curvePower = 0.2f;
 float input_curveSwitch = 1.0f;
 float slippiness = 200.f;
 float brakespeed = 3000.f;
-float platterspeed = 3072.0f;
+float platterspeed = 9100.0f;
 float target_pitch = 15.0f;
 float blipthreshold = 400.0f;
 float pitch_filter = 0.1f;
@@ -108,7 +108,7 @@ void loadSettings()
 	scsettings.faderclosepoint = 2;
 	scsettings.faderopenpoint = 10;
 	scsettings.platterenabled = 1;
-	scsettings.platterspeed = 2275;
+	scsettings.platterspeed = 9100;
 	scsettings.samplerate = 48000;
 	scsettings.updaterate = 2000;
 	scsettings.debouncetime = 5;
@@ -376,10 +376,16 @@ int main(int argc, char *argv[])
 	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
     register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
-	register_variable("platterspeed", &platterspeed, 1.f, 8192.0f, 256.f);
+	register_variable("platterspeed", &platterspeed, 1.f, 32768.0f, 256.f);
 	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
 	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
-	
+
+	/* Sync scsettings.platterspeed (from config file) → float variable */
+	if (scsettings.platterspeed > 0)
+		platterspeed = (float)scsettings.platterspeed;
+
+	/* Load saved config (overrides defaults and scsettings) */
+	load_variables_from_file("/home/no3z/.scratchtj/config.cfg");
 
 	player_set_track(&deck[1].player, track_acquire_by_import(deck[1].importer, "/home/no3z/samples/scratch.wav"));
 

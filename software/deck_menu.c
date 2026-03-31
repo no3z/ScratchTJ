@@ -407,7 +407,7 @@ void action_jog_reverse(struct deck *d, int deckno) {
 void action_platter_speed(struct deck *d, int deckno) {
     float value;
     if (!get_variable_value("platterspeed", &value))
-        value = 3072.0f;
+        value = 9100.0f;
     float orig_value = value;
 
     needsUpdate = true;
@@ -433,7 +433,7 @@ void action_platter_speed(struct deck *d, int deckno) {
         if (movement != 0) {
             value += movement * 256.0f;
             if (value < 1.0f) value = 1.0f;
-            if (value > 8192.0f) value = 8192.0f;
+            if (value > 32768.0f) value = 32768.0f;
             if (ptr) *ptr = value;
             needsUpdate = true;
         }
@@ -451,7 +451,7 @@ void action_platter_speed(struct deck *d, int deckno) {
         if (needsUpdate) {
             char val_str[16], range_str[32];
             snprintf(val_str, sizeof(val_str), "%.0f", value);
-            snprintf(range_str, sizeof(range_str), "1 - 8192");
+            snprintf(range_str, sizeof(range_str), "1 - 32768");
             oled_clear();
             oled_draw_value_screen("Platter Speed", val_str, range_str);
             oled_flush();

@@ -3,9 +3,11 @@
 #include "alsa_mixer.h"
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "sc_input.h"
 #include "xwax.h"
 #include "shared_variables.h"
+#include "oled_display.h"
 
 /* Constants */
 #define MAX_MIXER_CONTROLS 20
@@ -18,16 +20,23 @@ static ControllerMenuOption selectedOption = CONTROLLER_SOUND_SETTINGS;
 static MixerControl mixerControls[MAX_MIXER_CONTROLS];
 static int mixerControlCount = 0;
 
+/* Config save path */
+#define CONFIG_SAVE_PATH "/home/no3z/.scratchtj/config.cfg"
+
 /* Controller menu options */
 static const char *controllerOptions[] = {
     "Sound Settings",
-    "Global Settings"
+    "Global Settings",
+    "Save Config",
+    "Reset Defaults"
 };
 
 /* Forward declarations */
 static void adjust_mixer_control(int selectedIndex);
 static void adjust_variable_value(EditableVariable *variable);
 static void display_mixer_control(MixerControl *control);
+static void action_save_config(void);
+static void action_reset_defaults(void);
 
 /* Display Controller Menu */
 void display_controller_menu(struct deck *d, int deck_no) {
@@ -58,6 +67,12 @@ void handle_controller_menu_navigation(struct deck *d, int deckno) {
                 break;
             case CONTROLLER_GLOBAL_SETTINGS:
                 enter_global_settings_menu(d, deckno);
+                break;
+            case CONTROLLER_SAVE_CONFIG:
+                action_save_config();
+                break;
+            case CONTROLLER_RESET_DEFAULTS:
+                action_reset_defaults();
                 break;
             default:
                 break;
@@ -310,4 +325,35 @@ static void adjust_variable_value(EditableVariable *variable) {
 
         usleep(5000);
     }
+}
+
+/* Show a confirmation screen, wait for any button, return */
+static void show_confirm_screen(const char *line1, const char *line2) {
+    oled_clear();
+    oled_draw_confirm(line1, line2);
+    oled_flush();
+
+    /* Wait for any button press to dismiss */
+    for (;;) {
+        if (rotary_button_pressed() || kb0_button_pressed())
+            break;
+        rotary_encoder_moved(); /* drain encoder */
+        usleep(10000);
+    }
+    needsUpdate = true;
+}
+
+/* Save current config to disk */
+static void action_save_config(void) {
+    mkdir("/home/no3z/.scratchtj", 0755);
+    if (save_variables_to_file(CONFIG_SAVE_PATH))
+        show_confirm_screen("Config Saved", "Press any button");
+    else
+        show_confirm_screen("Save Failed!", "Press any button");
+}
+
+/* Reset all variables to defaults */
+static void action_reset_defaults(void) {
+    reset_all_variables_to_defaults();
+    show_confirm_screen("Defaults Reset", "Press any button");
 }

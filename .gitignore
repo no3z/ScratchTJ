@@ -1,0 +1,27 @@
+# Build artifacts
+software/*.o
+software/*.d
+software/xwax
+software/gmon.out
+
+# IDE
+.vscode/
+software/.vscode/
+*.code-workspace
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Claude Code
+.claude/
+
+# Backup files
+*.bak
+
+# Profiling
+software/prof_output/
+
+# Debug output
+software/rotout.csv
+software/pitchvals.csv
