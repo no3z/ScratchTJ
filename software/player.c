@@ -50,7 +50,7 @@
 
 #define VOLUME (7.0 / 8)
 
-// Time in seconds fader takes to decay
+// Time in seconds fader takes to decay (matches SC1000)
 #define FADERDECAY 0.020
 #define DECAYSAMPLES FADERDECAY * 48000
 
@@ -532,21 +532,27 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-	// Pitch low-pass filter: alpha controls responsiveness vs smoothness
-	// Configurable via "pitch_filter" shared variable (Config Menu → Global Settings)
+	// Pitch low-pass filter: matches SC1000 exactly (0.1/0.9 IIR)
 	float pitch_alpha;
 	get_variable_value("pitch_filter", &pitch_alpha);
 	filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
-	amountToDecay = (DECAYSAMPLES) / (double)samples;
-
-	if (NearlyEqual(pl->faderTarget, pl->faderVolume, amountToDecay)) // Make sure to set directly when we're nearly there to avoid oscilation
+	// Fader volume ramp: fader_sharp=1.0 = instant, 0.0 = 20ms SC1000 style
+	float fader_sharpness;
+	get_variable_value("fader_sharp", &fader_sharpness);
+	if (fader_sharpness >= 1.0f) {
 		pl->faderVolume = pl->faderTarget;
-	else if (pl->faderTarget > pl->faderVolume)
-		pl->faderVolume += amountToDecay;
-	else
-		pl->faderVolume -= amountToDecay;
+	} else {
+		amountToDecay = (DECAYSAMPLES) / ((1.0 - fader_sharpness + 0.01) * (double)samples);
+		if (NearlyEqual(pl->faderTarget, pl->faderVolume, amountToDecay))
+			pl->faderVolume = pl->faderTarget;
+		else if (pl->faderTarget > pl->faderVolume)
+			pl->faderVolume += amountToDecay;
+		else
+			pl->faderVolume -= amountToDecay;
+	}
 
+	// Volume: matches SC1000 exactly
 	target_volume = fabs(pl->pitch) * VOLUME * pl->faderVolume;
 
 	if (target_volume > 1.0)

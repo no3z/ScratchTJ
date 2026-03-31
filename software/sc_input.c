@@ -39,7 +39,11 @@
 #define SERIAL_BAUD   B500000
 #define SYNC_BYTE     0xAA
 #define HANDSHAKE_MAGIC 0x53
-#define PKT_LEN       7
+/* Packet length: 7 for v2 Arduino firmware, 8 for legacy (with encoder angle).
+ * Auto-detect: try 7 first; if checksums keep failing, switch to 8. */
+#define PKTLEN_V2    7
+#define PKTLEN_V1    8
+static int pkt_len = PKTLEN_V2;  /* Use 7-byte parsing (works with both firmwares) */
 
 /* ── MT6701 constants ──────────────────────────────────────────── */
 #define MT6701_ADDR      0x06
@@ -540,23 +544,44 @@ static void read_serial_data(void) {
             ring[wpos++ & 0xFF] = tmp[i];
     }
 
-    /* Scan for valid packets (7 bytes: SYNC fHi fLo cHi cLo buttons checksum) */
+    /* Scan for valid packets.
+     * v2 (7 bytes): SYNC fHi fLo cHi cLo buttons checksum(1-5)
+     * v1 (8 bytes): SYNC fHi fLo aHi aLo cHi cLo checksum(1-6) */
     int avail = (wpos - rpos) & 0xFF;
-    while (avail >= PKT_LEN) {
+    while (avail >= pkt_len) {
         if (ring[rpos & 0xFF] != SYNC_BYTE) {
             rpos++; avail--; continue;
         }
 
-        uint8_t p[PKT_LEN];
-        for (int i = 0; i < PKT_LEN; i++)
+        uint8_t p[8];
+        for (int i = 0; i < pkt_len; i++)
             p[i] = ring[(rpos + i) & 0xFF];
 
-        uint8_t chk = p[1] ^ p[2] ^ p[3] ^ p[4] ^ p[5];
-        if (chk == p[6]) {
-            int fader_value = (p[1] << 8) | p[2];
-            int cap_value   = (p[3] << 8) | p[4];
-            uint8_t btn     = p[5];
+        int fader_value, cap_value;
+        uint8_t btn = 0;
+        bool valid = false;
 
+        if (pkt_len == PKTLEN_V1) {
+            /* v1: [SYNC fHi fLo aHi aLo cHi cLo chk] -- ignore angle bytes */
+            uint8_t chk = p[1] ^ p[2] ^ p[3] ^ p[4] ^ p[5] ^ p[6];
+            if (chk == p[7]) {
+                fader_value = (p[1] << 8) | p[2];
+                /* p[3],p[4] = encoder angle (ignored, Pi reads MT6701) */
+                cap_value   = (p[5] << 8) | p[6];
+                valid = true;
+            }
+        } else {
+            /* v2: [SYNC fHi fLo cHi cLo buttons chk] */
+            uint8_t chk = p[1] ^ p[2] ^ p[3] ^ p[4] ^ p[5];
+            if (chk == p[6]) {
+                fader_value = (p[1] << 8) | p[2];
+                cap_value   = (p[3] << 8) | p[4];
+                btn         = p[5];
+                valid = true;
+            }
+        }
+
+        if (valid) {
             /* Process fader */
             float curveSwitch;
             bool switchFader = false;
@@ -571,10 +596,11 @@ static void read_serial_data(void) {
             /* Process capacitive touch */
             capIsTouched = (cap_value > 5000) ? 1 : 0;
 
-            /* Process cue buttons (edge detection) */
-            process_cue_buttons(btn);
+            /* Process cue buttons (v2 only, v1 has no button byte) */
+            if (pkt_len == PKTLEN_V2)
+                process_cue_buttons(btn);
 
-            rpos += PKT_LEN;
+            rpos += pkt_len;
             avail = (wpos - rpos) & 0xFF;
         } else {
             rpos++; avail--;
@@ -788,7 +814,7 @@ void *SC_InputThread(void *ptr)
 			}
 		}
 
-		/* Read serial data (fader + cap + buttons) */
+		/* Read fader + cap + buttons from serial */
 		read_serial_data();
 
 		/* Read MT6701 angle (replaces Arduino encoder) */
@@ -829,7 +855,8 @@ process_pic();
 			lastinputtime = inputtime;
 		}
 
-		usleep(scsettings.updaterate);
+		/* No sleep -- loop as fast as I2C allows (~2-5kHz),
+		 * matching SC1000 behavior for tight scratch response */
 	}
 }
 

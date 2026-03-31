@@ -132,19 +132,19 @@ static int pcm_open(struct alsa_pcm *alsa, const char *device_name,
         return -1;
     }*/
 
+    /* Set period size first (= actual audio latency), then buffer = 2 periods */
+    {
+        snd_pcm_uframes_t period_frames = buffer_size / 2;
+        dir = 0;
+        r = snd_pcm_hw_params_set_period_size_near(alsa->pcm, hw_params, &period_frames, &dir);
+        if (!chk("hw_params_set_period_size_near", r))
+            return -1;
+    }
+
     if (snd_pcm_hw_params_set_buffer_size(alsa->pcm, hw_params, buffer_size) < 0)
     {
         fprintf(stderr, "Error setting buffersize.\n");
         return (-1);
-    }
-
-    p = 2; /* double buffering */
-    dir = 1;
-    r = snd_pcm_hw_params_set_periods_min(alsa->pcm, hw_params, &p, &dir);
-    if (!chk("hw_params_set_periods_min", r))
-    {
-        fprintf(stderr, "Buffer may be too small for this hardware.\n");
-        return -1;
     }
 
     r = snd_pcm_hw_params(alsa->pcm, hw_params);

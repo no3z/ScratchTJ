@@ -277,6 +277,55 @@ void oled_draw_cue_bar(const int states[4], const double positions[4]) {
     }
 }
 
+void oled_draw_fader_curve(int x, int y, int w, int h,
+                           float factor, float power, float decay) {
+    /* Draw axes */
+    oled_draw_line(x, y, x, y + h, THEME_SCROLLBAR);           /* Y axis */
+    oled_draw_line(x, y + h, x + w, y + h, THEME_SCROLLBAR);   /* X axis */
+
+    /* Labels */
+    st7789_draw_string(x - 8, y - 2, "V", THEME_RANGE_FG, FONT_SMALL);
+    st7789_draw_string(x + w - 8, y + h + 2, "F", THEME_RANGE_FG, FONT_SMALL);
+
+    /* Draw the fader curve: left half (deck 0 volume) */
+    int prev_y_val = -1;
+    for (int i = 0; i <= w; i++) {
+        float fader = (float)i / (float)w;  /* 0..1 fader position */
+        float vol;
+
+        if (fader < 0.02f) {
+            vol = 0.0f;
+        } else if (fader <= 0.5f) {
+            vol = powf(fader / factor, power);
+            if (vol > 1.0f) vol = 1.0f;
+        } else {
+            vol = 1.0f;
+        }
+
+        int py = y + h - (int)(vol * h);
+        if (py < y) py = y;
+        if (prev_y_val >= 0)
+            oled_draw_line(x + i - 1, prev_y_val, x + i, py, THEME_DECK1_ACCENT);
+        prev_y_val = py;
+    }
+
+    /* Draw decay indicator: vertical dashed line showing open time */
+    if (decay > 0.0f && decay < 0.05f) {
+        /* Map decay time to pixels: 50ms = full width, show as % */
+        int dx = (int)(decay / 0.05f * w);
+        if (dx < 2) dx = 2;
+        if (dx > w) dx = w;
+        for (int dy = 0; dy < h; dy += 4) {
+            st7789_pixel(x + dx, y + dy, THEME_CUE3_COLOR);
+            st7789_pixel(x + dx, y + dy + 1, THEME_CUE3_COLOR);
+        }
+        /* Label */
+        char ms_str[16];
+        snprintf(ms_str, sizeof(ms_str), "%.0fms", decay * 1000.0f);
+        st7789_draw_string(x + dx + 3, y, ms_str, THEME_CUE3_COLOR, FONT_SMALL);
+    }
+}
+
 int oled_compute_scroll(int selected, int scroll_offset, int visible_lines) {
     if (selected < scroll_offset)
         scroll_offset = selected;

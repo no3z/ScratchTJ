@@ -74,6 +74,10 @@ void oled_draw_center_fader(int x, int y, int w, int h, float value, uint16_t co
 void oled_set_cue_overlay(const int states[4], const double positions[4]);
 void oled_format_time(double seconds, char *buf, int bufsize);
 
+/* Fader curve graph for parameter editing */
+void oled_draw_fader_curve(int x, int y, int w, int h,
+                           float factor, float power, float decay);
+
 /* Scroll offset helper - call after changing selectedItem */
 int oled_compute_scroll(int selected, int scroll_offset, int visible_lines);
 

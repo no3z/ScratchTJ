@@ -2,6 +2,7 @@
 #include "lcd_menu.h"
 #include "alsa_mixer.h"
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include "sc_input.h"
@@ -319,6 +320,18 @@ static void adjust_variable_value(EditableVariable *variable) {
 
             oled_clear();
             oled_draw_value_screen(variable->name, val_str, range_str);
+
+            /* Draw fader curve graph for fader-related parameters */
+            if (strcmp(variable->name, "Fad Factor") == 0 ||
+                strcmp(variable->name, "Fad Power") == 0 ||
+                strcmp(variable->name, "fader_sharp") == 0) {
+                float ff, fp, fs;
+                get_variable_value("Fad Factor", &ff);
+                get_variable_value("Fad Power", &fp);
+                get_variable_value("fader_sharp", &fs);
+                oled_draw_fader_curve(30, 120, 180, 80, ff, fp, fs);
+            }
+
             oled_flush();
             needsUpdate = false;
         }

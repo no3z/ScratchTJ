@@ -69,9 +69,10 @@ float input_curveSwitch = 1.0f;
 float slippiness = 200.f;
 float brakespeed = 3000.f;
 float platterspeed = 9100.0f;
-float target_pitch = 15.0f;
+float target_pitch = 40.0f;
 float blipthreshold = 400.0f;
 float pitch_filter = 0.1f;
+float fader_sharpness = 1.0f;
 
 unsigned int countChars(char *string, char c)
 {
@@ -379,6 +380,7 @@ int main(int argc, char *argv[])
 	register_variable("platterspeed", &platterspeed, 1.f, 32768.0f, 256.f);
 	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
 	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
+	register_variable("fader_sharp", &fader_sharpness, 0.0f, 1.0f, 0.05f);
 
 	/* Sync scsettings.platterspeed (from config file) → float variable */
 	if (scsettings.platterspeed > 0)
