@@ -39,7 +39,6 @@ ScratchTJ is a custom digital DJ controller inspired by [the_rasteri's SC1000](h
 - **3-slot preset system** -- save and recall entire configurations
 - **ALSA mixer integration** -- adjust sound card volume and gain from the menu
 - **Recording** -- record audio input directly to WAV files
-- **MIDI support** -- connect external controllers via USB MIDI
 - **Fully configurable** -- all parameters adjustable in real-time through the menu system
 
 ![ScratchTJ MK2 - Assembled Unit](docs/image8.jpeg)
@@ -157,8 +156,6 @@ STL files are in [docs/enclosure/stls/](docs/enclosure/stls/).
 
 Full design documentation: [docs/enclosure/ENCLOSURE_DESIGN.md](docs/enclosure/ENCLOSURE_DESIGN.md)
 
-![3D printed button extender](docs/2buttons.png)
-
 ---
 
 ## Bill of Materials
@@ -181,8 +178,6 @@ Full design documentation: [docs/enclosure/ENCLOSURE_DESIGN.md](docs/enclosure/E
 | Phosphor bronze strip | -- | Spring contact |
 | DuPont connectors & wire | -- | I2C, SPI, GPIO wiring |
 | M2, M2.5, M3 screws | -- | Assembly |
-
-![AliExpress components](docs/alicomponents.png)
 
 ---
 
@@ -253,7 +248,7 @@ Key settings:
 - `pitchrange` -- pitch bend range percentage
 - `buffersize` -- audio buffer size
 
-GPIO button mapping and MIDI mapping are also configured in `scsettings.txt`.
+GPIO button mapping is also configured in `scsettings.txt`.
 
 ---
 
@@ -268,6 +263,7 @@ The original MK1 build is preserved at the `mk1` tag.
 - [ScratchTJ Demo](https://youtu.be/rufXcn8hjYE)
 - [Menu System Demo](https://youtu.be/jpz3jol8UZQ)
 - [Fader and Controls](https://youtu.be/uF4GSIXVzZU)
+- [MK2 Build -- testing new components](https://youtu.be/ob8X8q4Xurs)
 
 ---
 
