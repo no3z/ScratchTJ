@@ -10,7 +10,10 @@ typedef enum {
     DECK_MENU_SETTINGS,
     DECK_MENU_ADJUST_VOLUME,
     DECK_MENU_INFO,
+    DECK_MENU_BROWSE_FOLDERS,      // State for browsing folders
+    DECK_MENU_BROWSE_FILES,        // State for browsing files in a folder
     DECK_MENU_RECORD_INPUT_SOURCE, // State for selecting input source
+    DECK_MENU_RECORD_SETUP,        // State for recording setup (levels, controls)
     DECK_MENU_RECORDING            // State for recording in progress
 } DeckMenuState;
 

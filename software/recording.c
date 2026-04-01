@@ -271,3 +271,61 @@ void stop_recording(struct deck *d, RecordingContext *context)
     // Reset running flag
     context->running = 0;
 }
+
+/* ── Peak level meter ─────────────────────────────────────────── */
+
+static snd_pcm_t *peak_handle = NULL;
+static char peak_device[128] = {0};
+
+float read_input_peak(const char *device)
+{
+    int err;
+
+    /* Open on first call or device change */
+    if (!peak_handle || strcmp(device, peak_device) != 0) {
+        if (peak_handle) {
+            snd_pcm_close(peak_handle);
+            peak_handle = NULL;
+        }
+        if ((err = snd_pcm_open(&peak_handle, device,
+                                SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK)) < 0) {
+            return -1.0f;
+        }
+
+        snd_pcm_hw_params_t *hw;
+        snd_pcm_hw_params_alloca(&hw);
+        snd_pcm_hw_params_any(peak_handle, hw);
+        snd_pcm_hw_params_set_access(peak_handle, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
+        snd_pcm_hw_params_set_format(peak_handle, hw, SND_PCM_FORMAT_S16_LE);
+        unsigned int rate = 48000;
+        snd_pcm_hw_params_set_rate_near(peak_handle, hw, &rate, 0);
+        snd_pcm_hw_params_set_channels(peak_handle, hw, 2);
+        snd_pcm_uframes_t bufsize = 512;
+        snd_pcm_hw_params_set_buffer_size_near(peak_handle, hw, &bufsize);
+        if ((err = snd_pcm_hw_params(peak_handle, hw)) < 0) {
+            snd_pcm_close(peak_handle);
+            peak_handle = NULL;
+            return -1.0f;
+        }
+        strncpy(peak_device, device, sizeof(peak_device) - 1);
+    }
+
+    /* Read one buffer */
+    int16_t buf[512 * 2]; /* 512 frames stereo */
+    snd_pcm_sframes_t frames = snd_pcm_readi(peak_handle, buf, 512);
+    if (frames == -EPIPE) {
+        snd_pcm_prepare(peak_handle);
+        frames = snd_pcm_readi(peak_handle, buf, 512);
+    }
+    if (frames <= 0)
+        return 0.0f;
+
+    /* Find peak */
+    int16_t peak = 0;
+    for (int i = 0; i < frames * 2; i++) {
+        int16_t v = buf[i] < 0 ? -buf[i] : buf[i];
+        if (v > peak) peak = v;
+    }
+
+    return (float)peak / 32768.0f;
+}

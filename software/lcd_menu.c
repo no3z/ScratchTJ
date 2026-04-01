@@ -23,7 +23,7 @@ static unsigned long lastButtonPressTime = 0;
 /* Auto-return and home screen refresh timers */
 static unsigned long lastActivityTime = 0;
 static unsigned long lastHomeRedrawTime = 0;
-#define HOME_REDRAW_INTERVAL_MS  100
+#define HOME_REDRAW_INTERVAL_MS  22
 #define AUTO_RETURN_TIMEOUT_MS  10000
 
 static unsigned long menu_millis(void) {
@@ -146,16 +146,22 @@ int rotary_encoder_moved() {
 
 /* Detects rotary button click: 1 on release, 0 otherwise (back button) */
 int rotary_button_pressed() {
+    static unsigned long lastRotRelease = 0;
     bool buttonState = gpio_read(ROTARY_SW) == 0; /* active low */
+    unsigned long now = gpio_millis();
 
     if (buttonState) {
-        if (lastButtonPressTime == 0) lastButtonPressTime = gpio_millis();
+        if (lastButtonPressTime == 0) lastButtonPressTime = now;
     } else {
-        if (lastButtonPressTime > 0) {
-            lastButtonPressTime = 0;
-            lastActivityTime = menu_millis();
-            return 1;  /* click = back */
+        if (lastButtonPressTime > 0 && (now - lastButtonPressTime) > 30) {
+            if ((now - lastRotRelease) > 100) {
+                lastButtonPressTime = 0;
+                lastRotRelease = now;
+                lastActivityTime = menu_millis();
+                return 1;  /* click = back */
+            }
         }
+        lastButtonPressTime = 0;
     }
     return 0;
 }
@@ -163,17 +169,25 @@ int rotary_button_pressed() {
 /* KB0 button (GPIO17): 1 on release (select/enter), 0 otherwise */
 int kb0_button_pressed() {
     static unsigned long kb0PressTime = 0;
+    static unsigned long kb0LastRelease = 0;
 
     bool pressed = gpio_read(ROTARY_KO) == 0;  /* active low */
+    unsigned long now = gpio_millis();
 
     if (pressed) {
-        if (kb0PressTime == 0) kb0PressTime = gpio_millis();
+        if (kb0PressTime == 0) kb0PressTime = now;
     } else {
-        if (kb0PressTime > 0) {
-            kb0PressTime = 0;
-            lastActivityTime = menu_millis();
-            return 1;  /* click = select */
+        if (kb0PressTime > 0 && (now - kb0PressTime) > 30) {
+            /* Debounce: ignore presses shorter than 30ms (bounce) */
+            /* Also enforce 100ms cooldown between events */
+            if ((now - kb0LastRelease) > 100) {
+                kb0PressTime = 0;
+                kb0LastRelease = now;
+                lastActivityTime = menu_millis();
+                return 1;  /* click = select */
+            }
         }
+        kb0PressTime = 0;
     }
     return 0;
 }

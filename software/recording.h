@@ -30,4 +30,9 @@ int start_recording(RecordingContext *context, const char *input_device, const c
 
 void stop_recording(struct deck *d, RecordingContext *context);
 
+/* Read peak input level from ALSA capture device.
+ * Returns 0.0 - 1.0 normalized peak. Returns -1.0 on error.
+ * Opens and closes the device each call (~10ms). Call at ~10Hz. */
+float read_input_peak(const char *device);
+
 #endif // RECORDING_H

@@ -10,6 +10,7 @@
 #include "cues.h"
 #include "recording.h"
 #include "shared_variables.h"
+#include "alsa_mixer.h"
 
 #define MAX_INPUT_SOURCES 10
 
@@ -32,6 +33,36 @@ static void display_recording_status(struct deck *d, int deck_no);
 static void handle_record_input_sources_navigation(struct deck *d, int deckno);
 static void handle_recording_navigation(struct deck *d, int deckno);
 static void action_select_input_source(struct deck *d, int deckno);
+static void display_record_setup(struct deck *d, int deck_no);
+static void handle_record_setup_navigation(struct deck *d, int deckno);
+static void display_browse_folders(struct deck *d);
+static void handle_browse_folders_navigation(struct deck *d, int deckno);
+static void display_browse_files(struct deck *d);
+static void handle_browse_files_navigation(struct deck *d, int deckno);
+
+/* File browser state */
+static struct Folder *browseFolder = NULL;   /* currently highlighted folder */
+static struct File *browseFile = NULL;       /* currently highlighted file */
+static int browseFolderIdx = 0;
+static int browseFileIdx = 0;
+static int browseFolderCount = 0;
+static int browseFileCount = 0;
+static int browseScrollOffset = 0;
+
+/* Recording setup state */
+static int setupSelectedSource = 0;
+static int setupSelectedItem = 0;  /* 0=Record, 1..N=mixer controls */
+
+/* Hardcoded AudioInjector mixer controls for recording setup */
+#define REC_SETUP_ITEMS 5  /* Record + 4 controls */
+static const char *rec_setup_control_names[] = {
+    "Input Mux",                  /* enum: Line In / Mic */
+    "Capture",                    /* capture volume 0-31 */
+    "Mic Boost",                  /* volume 0-1 */
+    "Output Mixer Line Bypass",   /* pswitch: passthrough */
+};
+#define REC_SETUP_NUM_CONTROLS 4
+static MixerControl rec_mixer[REC_SETUP_NUM_CONTROLS];
 void action_platter_speed(struct deck *d, int deckno);
 
 /* Menu and state variables */
@@ -41,6 +72,7 @@ static int scrollOffset = 0;
 
 /* Main deck menu items */
 static MenuItem mainDeckMenuItems[] = {
+    {"Start/Stop", action_start_stop},
     {"Load File", enter_load_file_menu},
     {"Settings", enter_settings_menu},
     {"Info", enter_deck_info_display},
@@ -105,8 +137,17 @@ void display_deck_menu(struct deck *d, int deck_no) {
             case DECK_MENU_INFO:
                 display_deck_info(d, deck_no);
                 break;
+            case DECK_MENU_BROWSE_FOLDERS:
+                display_browse_folders(d);
+                break;
+            case DECK_MENU_BROWSE_FILES:
+                display_browse_files(d);
+                break;
             case DECK_MENU_RECORD_INPUT_SOURCE:
                 display_input_sources_menu(inputSources, inputSourceCount, selectedItem, "Select Input");
+                break;
+            case DECK_MENU_RECORD_SETUP:
+                display_record_setup(d, deck_no);
                 break;
             case DECK_MENU_RECORDING:
                 display_recording_status(d, deck_no);
@@ -114,8 +155,9 @@ void display_deck_menu(struct deck *d, int deck_no) {
             default:
                 break;
         }
-        if (currentDeckMenuState == DECK_MENU_RECORDING)
-            needsUpdate = true;  /* keep redrawing for live timer */
+        if (currentDeckMenuState == DECK_MENU_RECORDING ||
+            currentDeckMenuState == DECK_MENU_RECORD_SETUP)
+            needsUpdate = true;  /* keep redrawing for live timer / level meter */
         else
             needsUpdate = false;
     }
@@ -152,8 +194,17 @@ void handle_deck_menu_navigation(struct deck *d, int deckno) {
             }
             break;
         }
+        case DECK_MENU_BROWSE_FOLDERS:
+            handle_browse_folders_navigation(d, deckno);
+            break;
+        case DECK_MENU_BROWSE_FILES:
+            handle_browse_files_navigation(d, deckno);
+            break;
         case DECK_MENU_RECORD_INPUT_SOURCE:
             handle_record_input_sources_navigation(d, deckno);
+            break;
+        case DECK_MENU_RECORD_SETUP:
+            handle_record_setup_navigation(d, deckno);
             break;
         case DECK_MENU_RECORDING:
             handle_recording_navigation(d, deckno);
@@ -194,7 +245,23 @@ void handle_menu_navigation(struct deck *d, int deckno, MenuItem *menuItems, int
 
 /* Menu actions */
 void enter_load_file_menu(struct deck *d, int deckno) {
-    currentDeckMenuState = DECK_MENU_LOAD_FILE;
+    /* Enter folder browser -- count folders */
+    browseFolder = d->FirstFolder;
+    browseFolderIdx = 0;
+    browseFolderCount = 0;
+    browseScrollOffset = 0;
+    struct Folder *f = d->FirstFolder;
+    while (f) { browseFolderCount++; f = f->next; }
+
+    fprintf(stderr, "enter_load_file_menu: FirstFolder=%p count=%d\n",
+            (void*)d->FirstFolder, browseFolderCount);
+
+    if (browseFolderCount > 0) {
+        currentDeckMenuState = DECK_MENU_BROWSE_FOLDERS;
+    } else {
+        /* No folders, fall back to old menu */
+        currentDeckMenuState = DECK_MENU_LOAD_FILE;
+    }
     selectedItem = 0;
     scrollOffset = 0;
     needsUpdate = true;
@@ -311,21 +378,45 @@ void action_record(struct deck *d, int deckno) {
 }
 
 static void action_select_input_source(struct deck *d, int deckno) {
-    InputSource *selectedSource = &inputSources[selectedItem];
+    setupSelectedSource = selectedItem;
+    setupSelectedItem = 0;
+
+    /* Load mixer controls for the setup screen */
+    MixerControl all_controls[20];
+    int total = get_mixer_controls("default", all_controls, 20);
+    for (int c = 0; c < REC_SETUP_NUM_CONTROLS; c++) {
+        rec_mixer[c].isVolume = false;
+        rec_mixer[c].isBoolean = false;
+        rec_mixer[c].isEnum = false;
+        snprintf(rec_mixer[c].name, sizeof(rec_mixer[c].name), "%s", rec_setup_control_names[c]);
+        /* Find matching control */
+        for (int j = 0; j < total; j++) {
+            if (strcmp(all_controls[j].name, rec_setup_control_names[c]) == 0) {
+                rec_mixer[c] = all_controls[j];
+                break;
+            }
+        }
+    }
+
+    currentDeckMenuState = DECK_MENU_RECORD_SETUP;
+    needsUpdate = true;
+}
+
+static void action_start_recording(struct deck *d, int deckno) {
+    InputSource *source = &inputSources[setupSelectedSource];
 
     char filename[256];
     snprintf(filename, sizeof(filename), "/tmp/rec%06d.raw", nextRecordingNumber++);
 
     printf("Deck %d: Recording from %s (%s)...\n", deckno + 1,
-           selectedSource->name, selectedSource->device);
+           source->name, source->device);
 
-    if (start_recording(&recordingContext, selectedSource->device, filename) == 0) {
+    if (start_recording(&recordingContext, source->device, filename) == 0) {
         recordingStartTime = gpio_millis();
         currentDeckMenuState = DECK_MENU_RECORDING;
         needsUpdate = true;
     } else {
         printf("Failed to start recording.\n");
-        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
         needsUpdate = true;
     }
 }
@@ -364,11 +455,11 @@ static void handle_recording_navigation(struct deck *d, int deckno) {
     int button_press = rotary_button_pressed();
     int kb0 = kb0_button_pressed();
 
-    /* KB0 = stop recording, stay in source select */
+    /* KB0 = stop recording, back to setup screen */
     if (kb0 == 1) {
         printf("Deck %d: Stopping recording.\n", deckno + 1);
         stop_recording(d, &recordingContext);
-        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
+        currentDeckMenuState = DECK_MENU_RECORD_SETUP;
         needsUpdate = true;
     }
     /* Rotary click = stop and go back */
@@ -551,9 +642,171 @@ void display_deck_info(struct deck *d, int deckno) {
     oled_flush();
 }
 
+/* ── File Browser ─────────────────────────────────────────────── */
+
+/* Helper: extract just the folder name from full path */
+static const char *folder_basename(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+/* Helper: extract just the filename from full path */
+static const char *file_basename(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+static void display_browse_folders(struct deck *d) {
+    oled_clear();
+    oled_draw_title_bar("Folders");
+
+    /* Build label list from folder linked list */
+    #define MAX_BROWSE 30
+    const char *labels[MAX_BROWSE];
+    struct Folder *f = d->FirstFolder;
+    int count = 0;
+    while (f && count < MAX_BROWSE) {
+        labels[count] = folder_basename(f->FullPath);
+        count++;
+        f = f->next;
+    }
+
+    browseScrollOffset = oled_compute_scroll(browseFolderIdx, browseScrollOffset, MENU_VISIBLE_LINES);
+    oled_draw_menu_list(labels, count, browseFolderIdx, browseScrollOffset, MENU_VISIBLE_LINES);
+
+    /* Show current folder file count at bottom */
+    if (browseFolder) {
+        char info[40];
+        int fc = 0;
+        struct File *fi = browseFolder->FirstFile;
+        while (fi) { fc++; fi = fi->next; }
+        snprintf(info, sizeof(info), "%d files", fc);
+        int iw = st7789_string_width(info, FONT_SMALL);
+        oled_text_color(DISPLAY_WIDTH - iw - 4, DISPLAY_HEIGHT - 12, info,
+                        FONT_SMALL, RGB565(100, 100, 100));
+    }
+    oled_flush();
+}
+
+static void handle_browse_folders_navigation(struct deck *d, int deckno) {
+    int movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
+    int kb0 = kb0_button_pressed();
+
+    if (movement != 0) {
+        browseFolderIdx = (browseFolderIdx + movement + browseFolderCount) % browseFolderCount;
+        /* Walk to the folder at this index */
+        browseFolder = d->FirstFolder;
+        for (int i = 0; i < browseFolderIdx && browseFolder; i++)
+            browseFolder = browseFolder->next;
+        needsUpdate = true;
+    }
+
+    /* KB0 = enter folder → show files */
+    if (kb0 == 1 && browseFolder) {
+        browseFile = browseFolder->FirstFile;
+        browseFileIdx = 0;
+        browseFileCount = 0;
+        browseScrollOffset = 0;
+        struct File *fi = browseFolder->FirstFile;
+        while (fi) { browseFileCount++; fi = fi->next; }
+        currentDeckMenuState = DECK_MENU_BROWSE_FILES;
+        needsUpdate = true;
+    }
+
+    /* Rotary click = back to deck menu */
+    if (button_press == 1) {
+        currentDeckMenuState = DECK_MENU_MAIN;
+        selectedItem = 0;
+        scrollOffset = 0;
+        needsUpdate = true;
+    }
+}
+
+static void display_browse_files(struct deck *d) {
+    oled_clear();
+    char title[32];
+    snprintf(title, sizeof(title), "%s", folder_basename(browseFolder->FullPath));
+    oled_draw_title_bar(title);
+
+    /* Build label list from file linked list */
+    const char *labels[MAX_BROWSE];
+    struct File *fi = browseFolder->FirstFile;
+    int count = 0;
+    while (fi && count < MAX_BROWSE) {
+        labels[count] = file_basename(fi->FullPath);
+        count++;
+        fi = fi->next;
+    }
+
+    browseScrollOffset = oled_compute_scroll(browseFileIdx, browseScrollOffset, MENU_VISIBLE_LINES);
+
+    /* Draw custom list with playing indicator */
+    int y = 26;
+    for (int i = browseScrollOffset; i < count && i < browseScrollOffset + MENU_VISIBLE_LINES; i++) {
+        bool sel = (i == browseFileIdx);
+        bool playing = false;
+
+        /* Check if this file is the currently loaded one */
+        struct File *check = browseFolder->FirstFile;
+        for (int j = 0; j < i && check; j++) check = check->next;
+        if (check && d->CurrentFile && strcmp(check->FullPath, d->CurrentFile->FullPath) == 0)
+            playing = true;
+
+        if (sel)
+            oled_fill_rect(0, y, DISPLAY_WIDTH, 16, THEME_SELECT_BG);
+
+        /* Playing indicator */
+        if (playing)
+            oled_text_color(2, y + 1, ">", FONT_SMALL, COLOR_GREEN);
+
+        oled_text_color(12, y + 1, labels[i], FONT_SMALL,
+                        sel ? COLOR_WHITE : RGB565(180, 180, 180));
+        y += 16;
+    }
+
+    /* File count at bottom */
+    char info[32];
+    snprintf(info, sizeof(info), "%d/%d", browseFileIdx + 1, count);
+    int iw = st7789_string_width(info, FONT_SMALL);
+    oled_text_color(DISPLAY_WIDTH - iw - 4, DISPLAY_HEIGHT - 12, info,
+                    FONT_SMALL, RGB565(100, 100, 100));
+
+    oled_flush();
+}
+
+static void handle_browse_files_navigation(struct deck *d, int deckno) {
+    int movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
+    int kb0 = kb0_button_pressed();
+
+    if (movement != 0) {
+        browseFileIdx = (browseFileIdx + movement + browseFileCount) % browseFileCount;
+        /* Walk to the file at this index */
+        browseFile = browseFolder->FirstFile;
+        for (int i = 0; i < browseFileIdx && browseFile; i++)
+            browseFile = browseFile->next;
+        needsUpdate = true;
+    }
+
+    /* KB0 = load selected file */
+    if (kb0 == 1 && browseFile) {
+        d->CurrentFolder = browseFolder;
+        d->CurrentFile = browseFile;
+        load_track(d, track_acquire_by_import(d->importer, browseFile->FullPath));
+        needsUpdate = true;
+    }
+
+    /* Rotary click = back to folder list */
+    if (button_press == 1) {
+        browseScrollOffset = 0;
+        currentDeckMenuState = DECK_MENU_BROWSE_FOLDERS;
+        needsUpdate = true;
+    }
+}
+
 static void display_input_sources_menu(InputSource *sources, int sourceCount,
                                        int selected, const char *title) {
-    /* Build label array from source names */
     const char *labels[MAX_INPUT_SOURCES];
     for (int i = 0; i < sourceCount && i < MAX_INPUT_SOURCES; i++)
         labels[i] = sources[i].name;
@@ -563,6 +816,186 @@ static void display_input_sources_menu(InputSource *sources, int sourceCount,
     oled_draw_title_bar(title);
     oled_draw_menu_list(labels, sourceCount, selected, scrollOffset, MENU_VISIBLE_LINES);
     oled_flush();
+}
+
+/* ── Recording Setup Screen ──────────────────────────────────── */
+
+static void display_record_setup(struct deck *d, int deck_no) {
+    oled_clear();
+    oled_draw_title_bar("Record Setup");
+
+    int y = 28;
+    char buf[64];
+
+    /* Item 0: RECORD button */
+    if (setupSelectedItem == 0) {
+        oled_fill_rect(0, y, DISPLAY_WIDTH, 18, THEME_SELECT_BG);
+        oled_fill_rect(6, y + 4, 10, 10, COLOR_RED);  /* red dot */
+        oled_text_color(20, y + 2, "RECORD", FONT_MEDIUM, COLOR_WHITE);
+    } else {
+        oled_fill_rect(6, y + 4, 10, 10, RGB565(100, 0, 0));
+        oled_text_color(20, y + 2, "RECORD", FONT_MEDIUM, RGB565(180, 180, 180));
+    }
+    y += 22;
+
+    /* Items 1..4: mixer controls */
+    for (int i = 0; i < REC_SETUP_NUM_CONTROLS; i++) {
+        MixerControl *mc = &rec_mixer[i];
+        bool sel = (setupSelectedItem == i + 1);
+
+        if (sel)
+            oled_fill_rect(0, y, DISPLAY_WIDTH, 18, THEME_SELECT_BG);
+
+        /* Short label */
+        const char *label;
+        if (strcmp(mc->name, "Input Mux") == 0) label = "Input";
+        else if (strcmp(mc->name, "Capture") == 0) label = "Gain";
+        else if (strcmp(mc->name, "Mic Boost") == 0) label = "Mic Boost";
+        else if (strcmp(mc->name, "Output Mixer Line Bypass") == 0) label = "Passthru";
+        else label = mc->name;
+
+        uint16_t color = sel ? COLOR_WHITE : RGB565(180, 180, 180);
+        oled_text_color(4, y + 2, label, FONT_SMALL, color);
+
+        /* Value on the right side */
+        if (mc->isVolume) {
+            snprintf(buf, sizeof(buf), "%ld", mc->current);
+            int vw = st7789_string_width(buf, FONT_SMALL);
+            oled_text_color(DISPLAY_WIDTH - vw - 50, y + 2, buf, FONT_SMALL,
+                            THEME_VALUE_FG);
+            /* Mini progress bar */
+            float pct = (mc->max > mc->min) ?
+                (float)(mc->current - mc->min) / (float)(mc->max - mc->min) : 0;
+            oled_draw_progress_bar(DISPLAY_WIDTH - 44, y + 3, 40, 12, pct,
+                                   THEME_DECK1_ACCENT);
+        } else if (mc->isBoolean) {
+            oled_text_color(DISPLAY_WIDTH - 30, y + 2,
+                            mc->current ? "On" : "Off", FONT_SMALL,
+                            mc->current ? THEME_VALUE_FG : RGB565(120, 120, 120));
+        } else if (mc->isEnum) {
+            const char *val = mc->enumItems[mc->currentEnumIndex];
+            int vw = st7789_string_width(val, FONT_SMALL);
+            oled_text_color(DISPLAY_WIDTH - vw - 4, y + 2, val, FONT_SMALL,
+                            THEME_VALUE_FG);
+        }
+        y += 20;
+    }
+
+    /* Separator line */
+    y += 4;
+    oled_hline(10, y, DISPLAY_WIDTH - 20);
+    y += 8;
+
+    /* Live input level meter */
+    InputSource *src = &inputSources[setupSelectedSource];
+    float peak = read_input_peak(src->device);
+    if (peak < 0) peak = 0;
+
+    /* Color: green < 0.7, yellow 0.7-0.9, red > 0.9 */
+    uint16_t bar_color;
+    if (peak > 0.9f) bar_color = COLOR_RED;
+    else if (peak > 0.7f) bar_color = COLOR_YELLOW;
+    else bar_color = COLOR_GREEN;
+
+    oled_text_color(4, y, "Level", FONT_SMALL, RGB565(140, 140, 140));
+    oled_draw_progress_bar(50, y, DISPLAY_WIDTH - 58, 14, peak, bar_color);
+
+    /* dB readout */
+    y += 18;
+    if (peak > 0.001f) {
+        float db = 20.0f * log10f(peak);
+        snprintf(buf, sizeof(buf), "%.1f dB", db);
+    } else {
+        snprintf(buf, sizeof(buf), "-inf dB");
+    }
+    int dw = st7789_string_width(buf, FONT_SMALL);
+    oled_text_color((DISPLAY_WIDTH - dw) / 2, y, buf, FONT_SMALL, RGB565(140, 140, 140));
+
+    oled_flush();
+}
+
+static void handle_record_setup_navigation(struct deck *d, int deckno) {
+    int movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
+    int kb0 = kb0_button_pressed();
+
+    /* Scroll through items */
+    if (movement != 0) {
+        setupSelectedItem = (setupSelectedItem + movement + REC_SETUP_ITEMS) % REC_SETUP_ITEMS;
+        needsUpdate = true;
+    }
+
+    /* KB0 = select */
+    if (kb0 == 1) {
+        if (setupSelectedItem == 0) {
+            /* RECORD */
+            action_start_recording(d, deckno);
+        } else {
+            /* Adjust mixer control inline */
+            int ci = setupSelectedItem - 1;
+            MixerControl *mc = &rec_mixer[ci];
+            bool adjusting = true;
+            needsUpdate = true;
+
+            long orig_val = mc->current;
+            int orig_enum = mc->currentEnumIndex;
+
+            while (adjusting) {
+                int mv = rotary_encoder_moved();
+                int bp = rotary_button_pressed();
+                int kb = kb0_button_pressed();
+
+                if (mv != 0) {
+                    if (mc->isVolume) {
+                        mc->current += mv;
+                        if (mc->current < mc->min) mc->current = mc->min;
+                        if (mc->current > mc->max) mc->current = mc->max;
+                        set_mixer_control("default", mc->name, mc->current);
+                    } else if (mc->isBoolean) {
+                        mc->current = !mc->current;
+                        set_mixer_control_boolean("default", mc->name, mc->current);
+                    } else if (mc->isEnum) {
+                        mc->currentEnumIndex = (mc->currentEnumIndex + mv +
+                                                mc->enumItemCount) % mc->enumItemCount;
+                        set_mixer_control_enum("default", mc->name, mc->currentEnumIndex);
+                    }
+                    needsUpdate = true;
+                }
+
+                /* KB0 = confirm */
+                if (kb == 1) adjusting = false;
+                /* Rotary click = cancel */
+                if (bp == 1) {
+                    if (mc->isVolume) {
+                        mc->current = orig_val;
+                        set_mixer_control("default", mc->name, mc->current);
+                    } else if (mc->isBoolean) {
+                        mc->current = orig_val;
+                        set_mixer_control_boolean("default", mc->name, mc->current);
+                    } else if (mc->isEnum) {
+                        mc->currentEnumIndex = orig_enum;
+                        set_mixer_control_enum("default", mc->name, mc->currentEnumIndex);
+                    }
+                    adjusting = false;
+                }
+
+                if (needsUpdate) {
+                    display_record_setup(d, deckno);
+                    needsUpdate = false;
+                }
+                usleep(50000); /* 20Hz update for level meter during adjustment */
+            }
+            needsUpdate = true;
+        }
+    }
+
+    /* Rotary click = back to input source select */
+    if (button_press == 1) {
+        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
+        selectedItem = setupSelectedSource;
+        scrollOffset = 0;
+        needsUpdate = true;
+    }
 }
 
 static void display_recording_status(struct deck *d, int deck_no) {

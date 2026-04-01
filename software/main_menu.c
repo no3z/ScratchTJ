@@ -85,18 +85,51 @@ static void build_main_menu_labels(struct deck *decks[], int deck_count) {
 
 static void draw_platter(struct deck *d, int cx, int cy, int r,
                          uint16_t accent) {
-    uint16_t ring_color;
+    /* ── Fader arc: ring fills CW from 12 o'clock proportional to faderVolume ── */
+    float fvol = d->player.faderVolume;
+    if (fvol < 0.0f) fvol = 0.0f;
+    if (fvol > 1.0f) fvol = 1.0f;
+
+    /* Always draw dim base ring */
+    oled_draw_circle(cx, cy, r, RGB565(40, 40, 40));
+    oled_draw_circle(cx, cy, r - 1, RGB565(40, 40, 40));
+
+    if (fvol > 0.01f) {
+        /* Draw lit arc from -90° (top) CW for fvol*360° */
+        float arc_deg = fvol * 360.0f;
+        int steps = (int)(arc_deg * 0.5f); /* ~2 pixels per degree */
+        if (steps < 1) steps = 1;
+        for (int s = 0; s <= steps; s++) {
+            float deg = -90.0f + (arc_deg * s / steps);
+            float rad = deg * (float)M_PI / 180.0f;
+            float cs = cosf(rad), sn = sinf(rad);
+            /* Draw 3px thick arc */
+            for (int rr = r - 2; rr <= r; rr++) {
+                int px = cx + (int)(rr * cs);
+                int py = cy + (int)(rr * sn);
+                if (px >= 0 && px < 240 && py >= 0 && py < 240)
+                    st7789_pixel(px, py, accent);
+            }
+        }
+    }
+
+    /* Touch: extra bright inner glow ring */
     if (capIsTouched) {
-        /* Touched: double bright ring */
-        ring_color = accent;
-        oled_draw_circle(cx, cy, r, ring_color);
-        oled_draw_circle(cx, cy, r - 1, ring_color);
-        oled_draw_circle(cx, cy, r - 2, ring_color);
-    } else {
-        /* Not touched: single dim ring */
-        ring_color = RGB565(80, 80, 80);
-        oled_draw_circle(cx, cy, r, ring_color);
-        oled_draw_circle(cx, cy, r - 1, ring_color);
+        oled_draw_circle(cx, cy, r - 3, accent);
+    }
+
+    /* 12 tick marks around the platter */
+    for (int t = 0; t < 12; t++) {
+        float tick_rad = (t * 30.0f - 90.0f) * (float)M_PI / 180.0f;
+        int tick_inner = r - 8;
+        int tick_outer = r - 3;
+        if (t % 3 == 0) tick_inner = r - 12;
+        int tx1 = cx + (int)(tick_inner * cosf(tick_rad));
+        int ty1 = cy + (int)(tick_inner * sinf(tick_rad));
+        int tx2 = cx + (int)(tick_outer * cosf(tick_rad));
+        int ty2 = cy + (int)(tick_outer * sinf(tick_rad));
+        uint16_t tick_color = (t % 3 == 0) ? RGB565(140, 140, 140) : RGB565(80, 80, 80);
+        oled_draw_line(tx1, ty1, tx2, ty2, tick_color);
     }
 
     /* Inner hub */
@@ -199,7 +232,8 @@ void display_home_screen(struct deck *decks[], int deck_count) {
 
     /* ── Info column right of platter (x=145..236) ───────────── */
     {
-        uint16_t dim = RGB565(130, 130, 130);
+        /* Text labels first */
+        uint16_t dim = RGB565(160, 160, 160);
         float ps_val = 1.0f;
         get_variable_value("platterspeed", &ps_val);
         snprintf(buf, sizeof(buf), "Spd: %d", (int)ps_val);
@@ -215,6 +249,60 @@ void display_home_screen(struct deck *decks[], int deck_count) {
         get_variable_value("slippiness", &slip_val);
         snprintf(buf, sizeof(buf), "Slip: %.0f", slip_val);
         oled_text_color(145, 66, buf, FONT_SMALL, dim);
+
+        /* ── Fader history graph below text (right of platter) ─── */
+        #define FHIST_LEN 90
+        #define FHIST_X   145
+        #define FHIST_Y   82
+        #define FHIST_H   55
+        /* Auto-zoom: find max value in history buffer and scale to fill graph */
+        static float fader_history[FHIST_LEN] = {0};
+        static int fhist_idx = 0;
+
+        /* Push 1 sample per display frame → smooth 1px/frame scroll.
+         * Visible window = FHIST_LEN * HOME_REDRAW_INTERVAL_MS (~2sec at 22ms) */
+        fader_history[fhist_idx] = d2->player.faderVolume;
+        fhist_idx = (fhist_idx + 1) % FHIST_LEN;
+
+        /* Auto-zoom: find peak in history, scale so peak fills ~90% of graph */
+        float hist_max = 0.001f;
+        for (int i = 0; i < FHIST_LEN; i++) {
+            if (fader_history[i] > hist_max) hist_max = fader_history[i];
+        }
+        float auto_zoom = 0.9f / hist_max;
+        if (auto_zoom > 50.0f) auto_zoom = 50.0f;  /* cap zoom when silent */
+        if (auto_zoom < 1.0f) auto_zoom = 1.0f;
+
+        /* Baseline dim line */
+        oled_draw_line(FHIST_X, FHIST_Y + FHIST_H, FHIST_X + FHIST_LEN,
+                       FHIST_Y + FHIST_H, RGB565(30, 30, 30));
+
+        /* Draw scrolling history: oldest left, newest right */
+        for (int i = 0; i < FHIST_LEN - 1; i++) {
+            int si  = (fhist_idx + i) % FHIST_LEN;
+            int si2 = (fhist_idx + i + 1) % FHIST_LEN;
+            float v1 = fader_history[si] * auto_zoom;
+            float v2 = fader_history[si2] * auto_zoom;
+            if (v1 > 1.0f) v1 = 1.0f;
+            if (v2 > 1.0f) v2 = 1.0f;
+            int x1 = FHIST_X + i;
+            int x2 = FHIST_X + i + 1;
+            int y1 = FHIST_Y + FHIST_H - (int)(v1 * FHIST_H);
+            int y2 = FHIST_Y + FHIST_H - (int)(v2 * FHIST_H);
+
+            /* Bright fade: older = dimmer, newest = full accent */
+            int age = (FHIST_LEN - 1 - i);
+            int r_c = 255 - age * 2; if (r_c < 40) r_c = 40;
+            int g_c = 140 - age;     if (g_c < 20) g_c = 20;
+            oled_draw_line(x1, y1, x2, y2, RGB565(r_c, g_c, 0));
+
+            /* Fill below the line for a solid waveform look */
+            if (v1 > 0.01f) {
+                int fill_bright = 60 - age / 2; if (fill_bright < 10) fill_bright = 10;
+                for (int fy = y1 + 1; fy <= FHIST_Y + FHIST_H; fy++)
+                    st7789_pixel(x1, fy, RGB565(fill_bright, fill_bright / 3, 0));
+            }
+        }
     }
 
     /* ── Full-width progress bar (y=150..156) — loop-aware ──── */
