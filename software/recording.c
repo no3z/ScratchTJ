@@ -277,16 +277,22 @@ void stop_recording(struct deck *d, RecordingContext *context)
 static snd_pcm_t *peak_handle = NULL;
 static char peak_device[128] = {0};
 
+void close_input_peak_monitor(void)
+{
+    if (peak_handle) {
+        snd_pcm_close(peak_handle);
+        peak_handle = NULL;
+    }
+    peak_device[0] = '\0';
+}
+
 float read_input_peak(const char *device)
 {
     int err;
 
     /* Open on first call or device change */
     if (!peak_handle || strcmp(device, peak_device) != 0) {
-        if (peak_handle) {
-            snd_pcm_close(peak_handle);
-            peak_handle = NULL;
-        }
+        close_input_peak_monitor();
         if ((err = snd_pcm_open(&peak_handle, device,
                                 SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK)) < 0) {
             return -1.0f;
@@ -303,8 +309,7 @@ float read_input_peak(const char *device)
         snd_pcm_uframes_t bufsize = 512;
         snd_pcm_hw_params_set_buffer_size_near(peak_handle, hw, &bufsize);
         if ((err = snd_pcm_hw_params(peak_handle, hw)) < 0) {
-            snd_pcm_close(peak_handle);
-            peak_handle = NULL;
+            close_input_peak_monitor();
             return -1.0f;
         }
         strncpy(peak_device, device, sizeof(peak_device) - 1);

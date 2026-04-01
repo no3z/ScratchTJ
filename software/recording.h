@@ -30,9 +30,12 @@ int start_recording(RecordingContext *context, const char *input_device, const c
 
 void stop_recording(struct deck *d, RecordingContext *context);
 
+/* Release the ALSA capture handle used by the setup-screen peak meter. */
+void close_input_peak_monitor(void);
+
 /* Read peak input level from ALSA capture device.
  * Returns 0.0 - 1.0 normalized peak. Returns -1.0 on error.
- * Opens and closes the device each call (~10ms). Call at ~10Hz. */
+ * Reuses a nonblocking capture handle until close_input_peak_monitor() is called. */
 float read_input_peak(const char *device);
 
 #endif // RECORDING_H

@@ -10,10 +10,23 @@ Install Raspberry Pi OS (Lite or Desktop). Tested on Raspbian Buster and Bullsey
 # Update system
 sudo apt update && sudo apt upgrade -y
 
-# Install build dependencies
+# Install build dependencies and runtime packages
 sudo apt install -y build-essential libasound2-dev libsdl2-dev \
-  git i2c-tools
+  git i2c-tools ffmpeg mpg123 sox
 ```
+
+### Required Packages
+
+| Package | Purpose |
+|---|---|
+| `build-essential` | GCC compiler and make |
+| `libasound2-dev` | ALSA audio development headers |
+| `libsdl2-dev` | SDL2 development headers (display/input) |
+| `git` | Source control |
+| `i2c-tools` | I2C diagnostics (`i2cdetect`, `i2cget`) |
+| `ffmpeg` | Audio decoding for WAV/FLAC/OGG import |
+| `mpg123` | MP3 decoding for track import |
+| `sox` | Audio utilities |
 
 ### Enable Interfaces
 
@@ -64,7 +77,7 @@ The Arduino Nano reads the DJ fader (analog) and capacitive touch sensor, sendin
 
 ### Serial Protocol (MK2)
 
-The Arduino sends 6-byte packets:
+The Arduino sends 7-byte packets at ~500 Hz:
 
 | Byte | Content |
 |---|---|
@@ -73,7 +86,8 @@ The Arduino sends 6-byte packets:
 | 2 | Fader low byte |
 | 3 | Capacitive touch high byte |
 | 4 | Capacitive touch low byte |
-| 5 | Checksum (XOR of bytes 1-4) |
+| 5 | Buttons (4-bit bitfield, one bit per cue button) |
+| 6 | Checksum (XOR of bytes 1-5) |
 
 ### Capacitive Touch Circuit
 
@@ -173,7 +187,32 @@ sudo LC_ALL=en_GB.utf8 nice -n -19 ./xwax
 
 ### Music Files
 
-Place audio files (MP3, FLAC, WAV, OGG) in directories. Use the Deck menu to navigate and load tracks.
+Place audio files in directories. Use the Deck menu to navigate and load tracks.
+
+**Supported formats:** MP3, FLAC, WAV, OGG (handled by `xwax-import`).
+
+**Recommended format:** 44100 Hz, 16-bit, stereo WAV with a standard 44-byte header. Files in this format load instantly via raw `dd` with zero CPU overhead. Other formats are decoded through `ffmpeg` or `mpg123` at load time.
+
+**Converting audio for optimal performance:**
+
+```bash
+# Convert MP3 to compatible WAV (strips metadata for clean 44-byte header)
+ffmpeg -y -i input.mp3 -map 0:a -ar 44100 -ac 2 \
+  -acodec pcm_s16le -bitexact -map_metadata -1 output.wav
+
+# Convert mono WAV to stereo
+ffmpeg -y -i mono.wav -ar 44100 -ac 2 \
+  -acodec pcm_s16le -bitexact -map_metadata -1 stereo.wav
+```
+
+**Important:** WAV files with embedded metadata (ID3 tags, cover art) have headers larger than 44 bytes. The `dd skip=44` fast path in `xwax-import` will produce noise for these files. Always use `-bitexact -map_metadata -1` when converting with ffmpeg.
+
+### File Organization
+
+```
+~/samples/           # Scratch samples (Deck 1)
+~/beats/             # Beat loops (Deck 0)
+```
 
 ---
 
@@ -195,8 +234,8 @@ Edit `scsettings.txt` in the software directory, or use the on-device Controller
 
 ### Presets
 
-The 3-slot preset system saves all shared variables to files:
-- `preset_1.cfg`, `preset_2.cfg`, `preset_3.cfg`
+The 5-slot preset system saves all shared variables to files:
+- `preset_1.cfg` through `preset_5.cfg`
 - Save/load through the Presets menu
 - Last-used preset is auto-loaded on startup
 
@@ -248,3 +287,6 @@ cd software && make test_tft_ui && sudo ./test_tft_ui
 | Platter not responding | Check `platterenabled=1` in scsettings.txt |
 | Buttons not working | Check GPIO pin mapping in scsettings.txt |
 | Permission denied | Run with `sudo` |
+| WAV sounds like noise | WAV has metadata making header >44 bytes. Re-encode with `ffmpeg -bitexact -map_metadata -1` |
+| Mono WAV plays at double speed | xwax expects stereo. Convert with `ffmpeg -ac 2` |
+| Recording fails (device busy) | Peak meter may hold ALSA capture open. Update to latest `deck_menu.c` with `close_input_peak_monitor()` fix |

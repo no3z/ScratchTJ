@@ -411,6 +411,9 @@ static void action_start_recording(struct deck *d, int deckno) {
     printf("Deck %d: Recording from %s (%s)...\n", deckno + 1,
            source->name, source->device);
 
+    /* Release the setup-screen peak meter handle before opening capture. */
+    close_input_peak_monitor();
+
     if (start_recording(&recordingContext, source->device, filename) == 0) {
         recordingStartTime = gpio_millis();
         currentDeckMenuState = DECK_MENU_RECORDING;
@@ -439,6 +442,7 @@ static void handle_record_input_sources_navigation(struct deck *d, int deckno) {
 
     /* Rotary click = back */
     if (button_press == 1) {
+        close_input_peak_monitor();
         if (mainMenuState == MENU_RECORD) {
             mainMenuState = MENU_MAIN;
             currentDeckMenuState = DECK_MENU_MAIN;
@@ -991,6 +995,7 @@ static void handle_record_setup_navigation(struct deck *d, int deckno) {
 
     /* Rotary click = back to input source select */
     if (button_press == 1) {
+        close_input_peak_monitor();
         currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
         selectedItem = setupSelectedSource;
         scrollOffset = 0;

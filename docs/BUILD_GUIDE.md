@@ -37,8 +37,13 @@ Here's your shopping list. Most of these can be found on AliExpress, Amazon, or 
 | **AudioInjector Sound Card** | I2S audio hat for high-quality sound | $20-30 |
 | **Arduino Nano** | Reads the fader, touch sensor, and cue buttons | $3-5 |
 | **MT6701 Hall-Effect Angle Sensor** | 14-bit magnetic encoder for platter position (I2C at 0x06) | $3-5 |
+
+![MT6701 magnetic encoder module](mt6701_magnetic_encoder.png)
+
 | **Rotary Encoder with Push Button** (small, for menu) | Navigate the TFT menu by turning and clicking | $1-2 |
 | **ST7789 240x240 TFT Display** | Shows menus, track names, settings (SPI interface) | $3-6 |
+
+![ST7789 240x240 TFT display module](st7789_tft_display.png)
 | **DJ Crossfader** (any linear fader) | Cut between beats and scratch sample | $5-15 |
 | **Hard Drive Platter** | The spinning disc you touch to scratch | Free (from old HDD) |
 | **1200 Ohm Resistor** (1.2kΩ) | Used for capacitive touch sensing | $0.10 |
