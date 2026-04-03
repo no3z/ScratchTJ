@@ -234,9 +234,9 @@ Edit `scsettings.txt` in the software directory, or use the on-device Controller
 
 ### Presets
 
-The 5-slot preset system saves all shared variables to files:
-- `preset_1.cfg` through `preset_5.cfg`
-- Save/load through the Presets menu
+The 3-slot preset system saves all shared variables to files:
+- `preset_1.cfg` through `preset_3.cfg`
+- Save/load through the Presets menu (not yet wired into main menu flow)
 - Last-used preset is auto-loaded on startup
 
 ---

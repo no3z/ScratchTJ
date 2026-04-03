@@ -11,6 +11,8 @@ This project is based on the work by **[the_rasteri](https://github.com/rasteri)
 
 ![MK2 top view -- platter, TFT display, buttons, and fader](docs/images/image6.jpeg)
 
+▶ *Click to play video:*
+
 [![Scratch demo](https://img.youtube.com/vi/LH9r2fsUk-c/hqdefault.jpg)](https://youtu.be/LH9r2fsUk-c?si=Gcfz0AI6pA22WaxF)
 
 ## Features
@@ -21,12 +23,14 @@ This project is based on the work by **[the_rasteri](https://github.com/rasteri)
 - Touch-sensitive HDD platter with capacitive sensing
 - Four cue buttons via Arduino (A0--A3) with short-press jump and long-press set
 - Live input recording from ALSA capture devices
-- Preset system to save and load all settings
+- Save/load configuration via Config menu
 - Binary serial protocol at 500 kbaud between Arduino and Pi
 - All key parameters tunable in real time from the menu
 - Pitch mode via rotary encoder long press
 
 ![MK2 alternate angle -- TFT and platter closeup](docs/images/image8.jpeg)
+
+▶ *Click to play video:*
 
 [![Randomize function scratch](https://img.youtube.com/vi/6zyM5B6j0_E/hqdefault.jpg)](https://youtu.be/6zyM5B6j0_E?si=wSV1pAbMLMZF-k79)
 
@@ -80,12 +84,14 @@ Key source files:
 | `software/lcd_menu.c` | TFT display, rotary encoder menu navigation |
 | `software/deck_menu.c` | Per-deck menu: file browse, transport, cue screen, recording |
 | `software/controller_menu.c` | Config menu: Sound Settings, Global Settings, Info |
-| `software/preset_menu.c` | Preset save/load/reset system |
+| `software/preset_menu.c` | 3-slot preset save/load (compiled, not yet wired into menu) |
 | `software/shared_variables.c` | Thread-safe runtime variable system for menu-tunable parameters |
 
 ## Menu System
 
 The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 back button (GPIO 17). The home screen shows a live platter visualization with deck info, fader graph, and cue indicators. 10 seconds of inactivity returns to home.
+
+▶ *Click to play video:*
 
 [![Menu and buttons demo](https://img.youtube.com/vi/j2CSrozANF8/hqdefault.jpg)](https://youtube.com/shorts/j2CSrozANF8?si=jhMayBKkclHSwKNa)
 
@@ -93,10 +99,13 @@ The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 back b
 
 ```
 HOME SCREEN
-│  Live platter visual, deck info, fader graph, cue bar
+│  Deck 2 platter visualization (fader arc, ghost/physical needles,
+│  touch glow, elapsed time), speed/pitch/motor/slip info column,
+│  fader history graph, progress bar, Deck 1 compact strip,
+│  cue flash banner, cue bar overlay
 │  Any encoder action → Main Menu
 │
-├── Deck 2 (hero deck)
+├── Dk2 [▶/■] filename 0:00  .. Deck 2 (hero deck)
 │   ├── Start/Stop .............. toggle playback
 │   ├── Load File
 │   │   ├── Folder Browser ..... scroll folders, KB0 to enter
@@ -113,9 +122,9 @@ HOME SCREEN
 │   │   ├── Toggle Jog Reverse . reverse platter direction
 │   │   └── Platter Speed ...... adjust encoder-to-audio ratio
 │   └── Info ................... filename, path, position, pitch,
-│                                volume, touch state, cue points
+│                                touch state, motor speed, cue points
 │
-├── Deck 1 (same structure as Deck 2)
+├── Dk1 [▶/■] filename 0:00  .. Deck 1 (same structure as Deck 2)
 │
 ├── Record Dk2 ................. shortcut to recording workflow
 │   ├── Input Source Selection .. list ALSA capture devices
@@ -126,7 +135,7 @@ HOME SCREEN
 │   │   ├── Mic Boost .......... on/off toggle
 │   │   └── Passthru ........... output line bypass on/off
 │   │   (live input level meter with dB readout)
-│   └── Recording .............. live timer, blinking red dot
+│   └── Recording .............. live MM:SS timer, blinking red dot
 │                                KB0 = stop, encoder = abort
 │
 ├── Config
@@ -148,9 +157,9 @@ HOME SCREEN
 | Control | Action |
 |---------|--------|
 | Encoder rotate | Scroll through menu items / adjust values |
-| Encoder push | Back / cancel / return to previous menu |
 | KB0 button (GPIO 17) short press | Select / confirm / enter submenu |
 | KB0 button long press | Return to home screen |
+| Encoder push (GPIO 27) | Back / cancel / return to previous menu |
 | Encoder long press | Enter Pitch Mode (adjust deck playback speed) |
 | 4 cue buttons (Arduino A0--A3) | Short press = jump to cue, long press = set cue |
 
@@ -211,6 +220,8 @@ If locale is not set as above, xwax may fail to start correctly.
 Open `arduino_nano/arduino_nano.ino` in the Arduino IDE. Install the `CapacitiveSensor` library, select Arduino Nano, and upload. Both the Arduino firmware and the Pi software must be updated together since they share the binary serial protocol.
 
 Audio samples go in `~/samples/` (scratch deck) and `~/beats/` (beat deck). The paths are configured in `xwax.c`.
+
+▶ *Click to play video:*
 
 [![Little scratch demo](https://img.youtube.com/vi/L9gylG18938/hqdefault.jpg)](https://youtube.com/shorts/L9gylG18938?si=5t2caiyyweBquCjl)
 
