@@ -178,6 +178,8 @@ The mount is a three-part printed assembly plus off-the-shelf hardware:
         └─────────────────┘
 ```
 
+![Encoder mount exploded view in OpenSCAD -- base, bearing, bolt with magnet, cap, and platter adapter](images/encoder_mount_openscad.png)
+
 ### The shaft: why an M5 bolt
 
 The shaft is simply an **M5 bolt** that passes through the bearing bore. This is the key design choice:
@@ -368,7 +370,7 @@ Touch state gates scratch behavior -- platter movement only affects audio when t
 
 The Arduino Nano handles the DJ crossfader (analog on A5), capacitive touch sensor (D10/D12), and 4 cue buttons (A0--A3). It sends all data to the Pi over serial.
 
-![Arduino Nano in its 3D printed cradle with USB serial connection](images/image4.jpeg)
+![Arduino Nano in its 3D printed cradle -- the 1.2kΩ resistor and the wire going to the platter spring contact are both soldered to the same D12 sense pin](images/image4.jpeg)
 
 The Nano sits in a friction-fit 3D printed cradle inside the enclosure. The USB port remains accessible from the side for firmware updates.
 
