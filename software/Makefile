@@ -110,11 +110,6 @@ xwax.o:		CPPFLAGS += $(DEVICE_CPPFLAGS)
 xwax.o:		CPPFLAGS += -DEXECDIR=\"$(EXECDIR)\" -DVERSION=\"$(VERSION)\"
 xwax.o:		.version
 
-# TFT UI test (standalone - no xwax deps)
-
-test_tft_ui:	test_tft_ui.o gpio_direct.o st7789.o oled_display.o
-		$(CC) $(LDFLAGS) -o $@ $^ -lm
-
 # Install to system
 
 .PHONY:		install

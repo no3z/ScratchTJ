@@ -283,12 +283,7 @@ The Pi reads the MT6701 angle directly over I2C at address 0x06 (14-bit, registe
 
 ## Legacy Files (v1 Reference)
 
-| File | Description |
-|------|-------------|
-| `djsc.obj` | Original Tinkercad enclosure (140x176x70mm) |
-| `obj.mtl` | Material file for djsc.obj |
-| `tinker.obj` | Original HDD adapter from Tinkercad |
-| `hdd-adapter.stl` | v1 HDD platter to encoder shaft adapter |
+v1 Tinkercad files (`djsc.obj`, `tinker.obj`) have been removed. They are available in the Git history under the `mk1` tag if needed.
 
 ---
 
