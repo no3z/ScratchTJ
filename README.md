@@ -22,11 +22,13 @@ This project is based on the work by **[the_rasteri](https://github.com/rasteri)
 - ST7789 240x240 TFT display with rotary encoder menu navigation
 - Touch-sensitive HDD platter with capacitive sensing
 - Four cue buttons via Arduino (A0--A3) with short-press jump and long-press set
-- Live input recording from ALSA capture devices
+- Two function modes for cue buttons: **CUE** (jump/set cue points) and **SETTINGS** (platter-based parameter control)
+- SETTINGS mode: hold button + rotate platter to adjust pitch, platterspeed, volume (gain), or toggle start/stop
+- Active deck switching via rotary long press -- platter, cue buttons, and display follow selected deck
+- Live input recording from AudioInjector capture
 - Save/load configuration via Config menu
 - Binary serial protocol at 500 kbaud between Arduino and Pi
-- All key parameters tunable in real time from the menu
-- Pitch mode via rotary encoder long press
+- All key parameters tunable in real time from the menu or SETTINGS function buttons
 
 ![MK2 alternate angle -- TFT and platter closeup](docs/images/image8.jpeg)
 
@@ -89,7 +91,7 @@ Key source files:
 
 ## Menu System
 
-The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 back button (GPIO 17). The home screen shows a live platter visualization with deck info, fader graph, and cue indicators. 10 seconds of inactivity returns to home.
+The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 button (GPIO 17). The home screen shows a live platter visualization for the active deck with info column, fader graph, and cue indicators. A function mode info strip shows the current button assignments.
 
 ▶ *Click to play video:*
 
@@ -99,14 +101,15 @@ The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 back b
 
 ```
 HOME SCREEN
-│  Deck 2 platter visualization (fader arc, ghost/physical needles,
+│  Active deck platter visualization (fader arc, ghost/physical needles,
 │  touch glow, elapsed time), speed/pitch/motor/slip info column,
-│  fader history graph, progress bar, Deck 1 compact strip,
-│  cue flash banner, cue bar overlay
-│  Any encoder action → Main Menu
+│  fader history graph, progress bar, other deck compact strip,
+│  function mode info strip, cue flash banner, cue bar overlay
+│  Title bar shows [S] indicator when in SETTINGS mode
+│  Long press rotary = switch active deck (DECK 1 ↔ DECK 2)
+│  KB0 or encoder turn → Main Menu
 │
-├── Dk2 [▶/■] filename 0:00  .. Deck 2 (hero deck)
-│   ├── Start/Stop .............. toggle playback
+├── Dk2 [▶/■] filename 0:00  .. Deck 2
 │   ├── Load File
 │   │   ├── Folder Browser ..... scroll folders, KB0 to enter
 │   │   └── File Browser ....... scroll files, KB0 to load
@@ -117,6 +120,7 @@ HOME SCREEN
 │   │       ├── Next Folder
 │   │       ├── Previous Folder
 │   │       └── Record ......... enter recording workflow
+│   ├── Start/Stop .............. toggle playback
 │   ├── Settings
 │   │   ├── Jog Pitch Mode ..... toggle pitch bend via platter
 │   │   ├── Toggle Jog Reverse . reverse platter direction
@@ -126,17 +130,16 @@ HOME SCREEN
 │
 ├── Dk1 [▶/■] filename 0:00  .. Deck 1 (same structure as Deck 2)
 │
-├── Record Dk2 ................. shortcut to recording workflow
-│   ├── Input Source Selection .. list ALSA capture devices
+├── Randomize .................. load random tracks on both decks
+│
+├── Record Dk2 ................. recording workflow
 │   ├── Record Setup
-│   │   ├── RECORD (start) ..... red indicator, begins capture
-│   │   ├── Input .............. Line In / Mic selector
-│   │   ├── Gain ............... capture volume (0-31)
-│   │   ├── Mic Boost .......... on/off toggle
-│   │   └── Passthru ........... output line bypass on/off
-│   │   (live input level meter with dB readout)
+│   │   ├── Source .............. AudioInjector hw:1,0 (KB0 cycles)
+│   │   └── RECORD ............. KB0 starts capture
 │   └── Recording .............. live MM:SS timer, blinking red dot
-│                                KB0 = stop, encoder = abort
+│                                KB0 = stop (auto-loads into deck)
+│
+├── Btn: CUE/SETTINGS ......... toggle function mode for cue buttons
 │
 ├── Config
 │   ├── Sound Settings ......... all ALSA mixer controls
@@ -157,11 +160,31 @@ HOME SCREEN
 | Control | Action |
 |---------|--------|
 | Encoder rotate | Scroll through menu items / adjust values |
-| KB0 button (GPIO 17) short press | Select / confirm / enter submenu |
-| KB0 button long press | Return to home screen |
-| Encoder push (GPIO 27) | Back / cancel / return to previous menu |
-| Encoder long press | Enter Pitch Mode (adjust deck playback speed) |
-| 4 cue buttons (Arduino A0--A3) | Short press = jump to cue, long press = set cue |
+| KB0 button (GPIO 17) | Select / confirm / enter submenu |
+| Encoder push (GPIO 27) short press | Back / cancel / return to previous menu |
+| Encoder push long press (500ms) | Switch active deck (DECK 1 ↔ DECK 2) |
+
+### Function Modes (CUE / SETTINGS)
+
+Toggle via main menu item "Btn: CUE/SETTINGS". Default is SETTINGS on startup.
+
+**CUE mode** -- cue buttons work as cue points:
+
+| Button | Action |
+|--------|--------|
+| Short press | Jump to stored cue point |
+| Long press (1s) | Set cue point at current position |
+
+**SETTINGS mode** -- cue buttons become parameter controls:
+
+| Button | Color | Function | Control |
+|--------|-------|----------|---------|
+| Btn 1 | Red | Pitch (note_pitch) | Hold + rotate platter (0.25x -- 4.0x) |
+| Btn 2 | Green | Platter Speed | Hold + rotate platter |
+| Btn 3 | Yellow | Start/Stop | Press to toggle |
+| Btn 4 | Blue | Volume (gain) | Hold + rotate platter (up to x3.60) |
+
+When holding a SETTINGS button and rotating the platter, a live overlay shows the parameter name, value, and gauge bar. Audio position is frozen during adjustment. Config auto-saves when buttons are released.
 
 ### Runtime-Tunable Parameters
 
