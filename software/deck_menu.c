@@ -27,18 +27,16 @@ extern bool needsUpdate;
 extern MainMenuState mainMenuState;
 
 /* Forward declarations */
-static void display_input_sources_menu(InputSource *sources, int sourceCount,
-                                       int selected, const char *title);
 static void display_recording_status(struct deck *d, int deck_no);
-static void handle_record_input_sources_navigation(struct deck *d, int deckno);
 static void handle_recording_navigation(struct deck *d, int deckno);
-static void action_select_input_source(struct deck *d, int deckno);
 static void display_record_setup(struct deck *d, int deck_no);
 static void handle_record_setup_navigation(struct deck *d, int deckno);
 static void display_browse_folders(struct deck *d);
 static void handle_browse_folders_navigation(struct deck *d, int deckno);
 static void display_browse_files(struct deck *d);
 static void handle_browse_files_navigation(struct deck *d, int deckno);
+void adjust_pitch(struct deck *d, int deckno);
+void action_randomize_both(struct deck *d, int deckno);
 
 /* File browser state */
 static struct Folder *browseFolder = NULL;   /* currently highlighted folder */
@@ -51,10 +49,9 @@ static int browseScrollOffset = 0;
 
 /* Recording setup state */
 static int setupSelectedSource = 0;
-static int setupSelectedItem = 0;  /* 0=Record, 1..N=mixer controls */
+static int setupSelectedItem = 0;  /* 0=Source, 1=Record */
 
-/* Hardcoded AudioInjector mixer controls for recording setup */
-#define REC_SETUP_ITEMS 5  /* Record + 4 controls */
+#define REC_SETUP_ITEMS 2  /* Source + Record */
 static const char *rec_setup_control_names[] = {
     "Input Mux",                  /* enum: Line In / Mic */
     "Capture",                    /* capture volume 0-31 */
@@ -72,8 +69,8 @@ static int scrollOffset = 0;
 
 /* Main deck menu items */
 static MenuItem mainDeckMenuItems[] = {
-    {"Start/Stop", action_start_stop},
     {"Load File", enter_load_file_menu},
+    {"Start/Stop", action_start_stop},
     {"Settings", enter_settings_menu},
     {"Info", enter_deck_info_display},
 };
@@ -134,6 +131,9 @@ void display_deck_menu(struct deck *d, int deck_no) {
             case DECK_MENU_ADJUST_VOLUME:
                 adjust_volume(d, deck_no);
                 break;
+            case DECK_MENU_ADJUST_PITCH:
+                adjust_pitch(d, deck_no);
+                break;
             case DECK_MENU_INFO:
                 display_deck_info(d, deck_no);
                 break;
@@ -142,9 +142,6 @@ void display_deck_menu(struct deck *d, int deck_no) {
                 break;
             case DECK_MENU_BROWSE_FILES:
                 display_browse_files(d);
-                break;
-            case DECK_MENU_RECORD_INPUT_SOURCE:
-                display_input_sources_menu(inputSources, inputSourceCount, selectedItem, "Select Input");
                 break;
             case DECK_MENU_RECORD_SETUP:
                 display_record_setup(d, deck_no);
@@ -155,9 +152,8 @@ void display_deck_menu(struct deck *d, int deck_no) {
             default:
                 break;
         }
-        if (currentDeckMenuState == DECK_MENU_RECORDING ||
-            currentDeckMenuState == DECK_MENU_RECORD_SETUP)
-            needsUpdate = true;  /* keep redrawing for live timer / level meter */
+        if (currentDeckMenuState == DECK_MENU_RECORDING)
+            needsUpdate = true;  /* keep redrawing for live timer */
         else
             needsUpdate = false;
     }
@@ -184,6 +180,9 @@ void handle_deck_menu_navigation(struct deck *d, int deckno) {
         case DECK_MENU_ADJUST_VOLUME:
             adjust_volume(d, deckno);
             break;
+        case DECK_MENU_ADJUST_PITCH:
+            adjust_pitch(d, deckno);
+            break;
         case DECK_MENU_INFO: {
             rotary_encoder_moved(); /* consume */
             int bp = rotary_button_pressed();
@@ -199,9 +198,6 @@ void handle_deck_menu_navigation(struct deck *d, int deckno) {
             break;
         case DECK_MENU_BROWSE_FILES:
             handle_browse_files_navigation(d, deckno);
-            break;
-        case DECK_MENU_RECORD_INPUT_SOURCE:
-            handle_record_input_sources_navigation(d, deckno);
             break;
         case DECK_MENU_RECORD_SETUP:
             handle_record_setup_navigation(d, deckno);
@@ -272,6 +268,58 @@ void enter_adjust_volume(struct deck *d, int deckno) {
     needsUpdate = true;
 }
 
+void enter_adjust_pitch(struct deck *d, int deckno) {
+    currentDeckMenuState = DECK_MENU_ADJUST_PITCH;
+    needsUpdate = true;
+}
+
+void adjust_pitch(struct deck *d, int deckno) {
+    static double orig_pitch = -1;
+    static bool first_entry = true;
+    int movement = rotary_encoder_moved();
+    int button_press = rotary_button_pressed();
+    int kb0 = kb0_button_pressed();
+    double pitch = d->player.note_pitch;
+
+    if (orig_pitch < 0) { orig_pitch = pitch; first_entry = true; }
+
+    if (first_entry) {
+        char val_str[16];
+        snprintf(val_str, sizeof(val_str), "%.2f", pitch);
+        oled_clear();
+        oled_draw_value_screen("Pitch", val_str, "0.25 - 4.00");
+        oled_flush();
+        first_entry = false;
+        needsUpdate = false;
+    }
+
+    if (movement != 0) {
+        pitch += movement * 0.01;
+        if (pitch < 0.25) pitch = 0.25;
+        if (pitch > 4.0) pitch = 4.0;
+        d->player.note_pitch = pitch;
+
+        char val_str[16];
+        snprintf(val_str, sizeof(val_str), "%.2f", pitch);
+        oled_clear();
+        oled_draw_value_screen("Pitch", val_str, "0.25 - 4.00");
+        oled_flush();
+        needsUpdate = false;
+    }
+
+    if (kb0 == 1) {
+        orig_pitch = -1;
+        currentDeckMenuState = DECK_MENU_MAIN;
+        needsUpdate = true;
+    }
+    if (button_press == 1) {
+        d->player.note_pitch = orig_pitch;
+        orig_pitch = -1;
+        currentDeckMenuState = DECK_MENU_MAIN;
+        needsUpdate = true;
+    }
+}
+
 void enter_settings_menu(struct deck *d, int deckno) {
     currentDeckMenuState = DECK_MENU_SETTINGS;
     selectedItem = 0;
@@ -286,44 +334,46 @@ void enter_deck_info_display(struct deck *d, int deckno) {
 
 void adjust_volume(struct deck *d, int deckno) {
     static double orig_volume = -1;
+    static bool first_entry = true;
     int movement = rotary_encoder_moved();
     int button_press = rotary_button_pressed();
     int kb0 = kb0_button_pressed();
-    double new_volume = d->player.setVolume * 100;
+    int vol_pct = (int)(d->player.setVolume * 100 + 0.5);
 
-    /* Save original on first entry */
-    if (orig_volume < 0) orig_volume = new_volume;
+    if (orig_volume < 0) { orig_volume = d->player.setVolume; first_entry = true; }
 
-    /* EC11 rotary = change value */
+    /* Draw on first entry */
+    if (first_entry) {
+        char val_str[16];
+        snprintf(val_str, sizeof(val_str), "%d%%", vol_pct);
+        oled_clear();
+        oled_draw_value_screen("Volume", val_str, "0 - 100%");
+        oled_flush();
+        first_entry = false;
+        needsUpdate = false;
+    }
+
     if (movement != 0) {
-        new_volume = new_volume + movement;
-        if (new_volume < 0) new_volume = 0;
-        if (new_volume > 127) new_volume = 127;
-
-        d->player.setVolume = new_volume / 100;
-        player_set_volume(&d->player, new_volume);
-        trigger_io_event(ACTION_VOLUME, deckno, (unsigned char)new_volume);
+        vol_pct += movement;
+        if (vol_pct < 0) vol_pct = 0;
+        if (vol_pct > 100) vol_pct = 100;
+        d->player.setVolume = vol_pct / 100.0;
 
         char val_str[16];
-        snprintf(val_str, sizeof(val_str), "%d", (int)new_volume);
-
+        snprintf(val_str, sizeof(val_str), "%d%%", vol_pct);
         oled_clear();
-        oled_draw_value_screen("Volume", val_str, "0 - 127");
+        oled_draw_value_screen("Volume", val_str, "0 - 100%");
         oled_flush();
         needsUpdate = false;
     }
 
-    /* KB0 = confirm */
     if (kb0 == 1) {
         orig_volume = -1;
         currentDeckMenuState = DECK_MENU_MAIN;
         needsUpdate = true;
     }
-    /* Rotary click = cancel (revert) */
     if (button_press == 1) {
-        d->player.setVolume = orig_volume / 100;
-        player_set_volume(&d->player, orig_volume);
-        trigger_io_event(ACTION_VOLUME, deckno, (unsigned char)orig_volume);
+        d->player.setVolume = orig_volume;
         orig_volume = -1;
         currentDeckMenuState = DECK_MENU_MAIN;
         needsUpdate = true;
@@ -351,6 +401,14 @@ void action_random_file(struct deck *d, int deckno) {
     currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
+void action_randomize_both(struct deck *d, int deckno) {
+    extern struct deck deck[2];
+    deck_random_file(&deck[0]);
+    deck_random_file(&deck[1]);
+    currentDeckMenuState = DECK_MENU_MAIN;
+    needsUpdate = true;
+}
+
 void action_next_folder(struct deck *d, int deckno) {
     trigger_io_event_no_param(ACTION_NEXTFOLDER, deckno);
     currentDeckMenuState = DECK_MENU_LOAD_FILE;
@@ -361,27 +419,7 @@ void action_prev_folder(struct deck *d, int deckno) {
     currentDeckMenuState = DECK_MENU_LOAD_FILE;
 }
 
-void action_record(struct deck *d, int deckno) {
-    inputSourceCount = get_available_input_sources(inputSources, MAX_INPUT_SOURCES);
-
-    if (inputSourceCount == 0) {
-        printf("No input sources available.\n");
-        currentDeckMenuState = DECK_MENU_LOAD_FILE;
-        needsUpdate = true;
-        return;
-    }
-
-    currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
-    selectedItem = 0;
-    scrollOffset = 0;
-    needsUpdate = true;
-}
-
-static void action_select_input_source(struct deck *d, int deckno) {
-    setupSelectedSource = selectedItem;
-    setupSelectedItem = 0;
-
-    /* Load mixer controls for the setup screen */
+static void load_mixer_for_source(void) {
     MixerControl all_controls[20];
     int total = get_mixer_controls("default", all_controls, 20);
     for (int c = 0; c < REC_SETUP_NUM_CONTROLS; c++) {
@@ -389,7 +427,6 @@ static void action_select_input_source(struct deck *d, int deckno) {
         rec_mixer[c].isBoolean = false;
         rec_mixer[c].isEnum = false;
         snprintf(rec_mixer[c].name, sizeof(rec_mixer[c].name), "%s", rec_setup_control_names[c]);
-        /* Find matching control */
         for (int j = 0; j < total; j++) {
             if (strcmp(all_controls[j].name, rec_setup_control_names[c]) == 0) {
                 rec_mixer[c] = all_controls[j];
@@ -397,10 +434,23 @@ static void action_select_input_source(struct deck *d, int deckno) {
             }
         }
     }
+}
 
+void action_record(struct deck *d, int deckno) {
+    /* Hardcode AudioInjector — no ALSA scan, instant entry */
+    if (inputSourceCount == 0) {
+        strncpy(inputSources[0].name, "AudioInjector", sizeof(inputSources[0].name));
+        strncpy(inputSources[0].device, "hw:1,0", sizeof(inputSources[0].device));
+        inputSourceCount = 1;
+        setupSelectedSource = 0;
+    }
+
+    setupSelectedItem = 1;  /* start on RECORD button */
     currentDeckMenuState = DECK_MENU_RECORD_SETUP;
     needsUpdate = true;
 }
+
+/* action_select_input_source removed — source is now inline in setup screen */
 
 static void action_start_recording(struct deck *d, int deckno) {
     InputSource *source = &inputSources[setupSelectedSource];
@@ -424,36 +474,7 @@ static void action_start_recording(struct deck *d, int deckno) {
     }
 }
 
-static void handle_record_input_sources_navigation(struct deck *d, int deckno) {
-    int encoder_movement = rotary_encoder_moved();
-    int button_press = rotary_button_pressed();
-    int kb0 = kb0_button_pressed();
-
-    if (encoder_movement != 0) {
-        selectedItem = (selectedItem + encoder_movement + inputSourceCount) % inputSourceCount;
-        needsUpdate = true;
-    }
-
-    /* KB0 = select input source */
-    if (kb0 == 1) {
-        action_select_input_source(d, deckno);
-        needsUpdate = true;
-    }
-
-    /* Rotary click = back */
-    if (button_press == 1) {
-        close_input_peak_monitor();
-        if (mainMenuState == MENU_RECORD) {
-            mainMenuState = MENU_MAIN;
-            currentDeckMenuState = DECK_MENU_MAIN;
-        } else {
-            currentDeckMenuState = DECK_MENU_LOAD_FILE;
-        }
-        selectedItem = 0;
-        scrollOffset = 0;
-        needsUpdate = true;
-    }
-}
+/* handle_record_input_sources_navigation removed — source is inline in setup */
 
 static void handle_recording_navigation(struct deck *d, int deckno) {
     int button_press = rotary_button_pressed();
@@ -809,113 +830,43 @@ static void handle_browse_files_navigation(struct deck *d, int deckno) {
     }
 }
 
-static void display_input_sources_menu(InputSource *sources, int sourceCount,
-                                       int selected, const char *title) {
-    const char *labels[MAX_INPUT_SOURCES];
-    for (int i = 0; i < sourceCount && i < MAX_INPUT_SOURCES; i++)
-        labels[i] = sources[i].name;
-
-    scrollOffset = oled_compute_scroll(selected, scrollOffset, MENU_VISIBLE_LINES);
-    oled_clear();
-    oled_draw_title_bar(title);
-    oled_draw_menu_list(labels, sourceCount, selected, scrollOffset, MENU_VISIBLE_LINES);
-    oled_flush();
-}
-
-/* ── Recording Setup Screen ──────────────────────────────────── */
+/* ── Recording Setup Screen (combined source + controls) ─────── */
 
 static void display_record_setup(struct deck *d, int deck_no) {
     oled_clear();
-    oled_draw_title_bar("Record Setup");
+    oled_draw_title_bar("Record");
 
-    int y = 28;
-    char buf[64];
-
-    /* Item 0: RECORD button */
-    if (setupSelectedItem == 0) {
-        oled_fill_rect(0, y, DISPLAY_WIDTH, 18, THEME_SELECT_BG);
-        oled_fill_rect(6, y + 4, 10, 10, COLOR_RED);  /* red dot */
-        oled_text_color(20, y + 2, "RECORD", FONT_MEDIUM, COLOR_WHITE);
-    } else {
-        oled_fill_rect(6, y + 4, 10, 10, RGB565(100, 0, 0));
-        oled_text_color(20, y + 2, "RECORD", FONT_MEDIUM, RGB565(180, 180, 180));
+    /* Item 0: Source */
+    int y = 60;
+    {
+        bool sel = (setupSelectedItem == 0);
+        if (sel) oled_fill_rect(0, y, DISPLAY_WIDTH, 20, THEME_SELECT_BG);
+        oled_text_color(8, y + 4, "Source:", FONT_SMALL,
+                        sel ? COLOR_WHITE : RGB565(160, 160, 160));
+        const char *sname = (inputSourceCount > 0)
+            ? inputSources[setupSelectedSource].device : "None";
+        int sw = st7789_string_width(sname, FONT_SMALL);
+        oled_text_color(DISPLAY_WIDTH - sw - 8, y + 4, sname, FONT_SMALL,
+                        THEME_VALUE_FG);
     }
-    y += 22;
+    y += 30;
 
-    /* Items 1..4: mixer controls */
-    for (int i = 0; i < REC_SETUP_NUM_CONTROLS; i++) {
-        MixerControl *mc = &rec_mixer[i];
-        bool sel = (setupSelectedItem == i + 1);
-
-        if (sel)
-            oled_fill_rect(0, y, DISPLAY_WIDTH, 18, THEME_SELECT_BG);
-
-        /* Short label */
-        const char *label;
-        if (strcmp(mc->name, "Input Mux") == 0) label = "Input";
-        else if (strcmp(mc->name, "Capture") == 0) label = "Gain";
-        else if (strcmp(mc->name, "Mic Boost") == 0) label = "Mic Boost";
-        else if (strcmp(mc->name, "Output Mixer Line Bypass") == 0) label = "Passthru";
-        else label = mc->name;
-
-        uint16_t color = sel ? COLOR_WHITE : RGB565(180, 180, 180);
-        oled_text_color(4, y + 2, label, FONT_SMALL, color);
-
-        /* Value on the right side */
-        if (mc->isVolume) {
-            snprintf(buf, sizeof(buf), "%ld", mc->current);
-            int vw = st7789_string_width(buf, FONT_SMALL);
-            oled_text_color(DISPLAY_WIDTH - vw - 50, y + 2, buf, FONT_SMALL,
-                            THEME_VALUE_FG);
-            /* Mini progress bar */
-            float pct = (mc->max > mc->min) ?
-                (float)(mc->current - mc->min) / (float)(mc->max - mc->min) : 0;
-            oled_draw_progress_bar(DISPLAY_WIDTH - 44, y + 3, 40, 12, pct,
-                                   THEME_DECK1_ACCENT);
-        } else if (mc->isBoolean) {
-            oled_text_color(DISPLAY_WIDTH - 30, y + 2,
-                            mc->current ? "On" : "Off", FONT_SMALL,
-                            mc->current ? THEME_VALUE_FG : RGB565(120, 120, 120));
-        } else if (mc->isEnum) {
-            const char *val = mc->enumItems[mc->currentEnumIndex];
-            int vw = st7789_string_width(val, FONT_SMALL);
-            oled_text_color(DISPLAY_WIDTH - vw - 4, y + 2, val, FONT_SMALL,
-                            THEME_VALUE_FG);
-        }
-        y += 20;
+    /* Item 1: RECORD button — big and centered */
+    {
+        bool sel = (setupSelectedItem == 1);
+        uint16_t bg = sel ? COLOR_RED : RGB565(80, 0, 0);
+        uint16_t fg = sel ? COLOR_WHITE : RGB565(160, 160, 160);
+        oled_fill_rect(30, y, DISPLAY_WIDTH - 60, 36, bg);
+        int tw = st7789_string_width("RECORD", FONT_LARGE);
+        oled_text_color((DISPLAY_WIDTH - tw) / 2, y + 6, "RECORD", FONT_LARGE, fg);
     }
 
-    /* Separator line */
-    y += 4;
-    oled_hline(10, y, DISPLAY_WIDTH - 20);
-    y += 8;
-
-    /* Live input level meter */
-    InputSource *src = &inputSources[setupSelectedSource];
-    float peak = read_input_peak(src->device);
-    if (peak < 0) peak = 0;
-
-    /* Color: green < 0.7, yellow 0.7-0.9, red > 0.9 */
-    uint16_t bar_color;
-    if (peak > 0.9f) bar_color = COLOR_RED;
-    else if (peak > 0.7f) bar_color = COLOR_YELLOW;
-    else bar_color = COLOR_GREEN;
-
-    oled_text_color(4, y, "Level", FONT_SMALL, RGB565(140, 140, 140));
-    oled_draw_progress_bar(50, y, DISPLAY_WIDTH - 58, 14, peak, bar_color);
-
-    /* dB readout */
-    y += 18;
-    if (peak > 0.001f) {
-        float db = 20.0f * log10f(peak);
-        snprintf(buf, sizeof(buf), "%.1f dB", db);
-    } else {
-        snprintf(buf, sizeof(buf), "-inf dB");
-    }
-    int dw = st7789_string_width(buf, FONT_SMALL);
-    oled_text_color((DISPLAY_WIDTH - dw) / 2, y, buf, FONT_SMALL, RGB565(140, 140, 140));
+    /* Instructions */
+    oled_text_color(40, 180, "KB0=select  ROT=back", FONT_SMALL,
+                    RGB565(100, 100, 100));
 
     oled_flush();
+    needsUpdate = false;
 }
 
 static void handle_record_setup_navigation(struct deck *d, int deckno) {
@@ -923,81 +874,31 @@ static void handle_record_setup_navigation(struct deck *d, int deckno) {
     int button_press = rotary_button_pressed();
     int kb0 = kb0_button_pressed();
 
-    /* Scroll through items */
     if (movement != 0) {
         setupSelectedItem = (setupSelectedItem + movement + REC_SETUP_ITEMS) % REC_SETUP_ITEMS;
         needsUpdate = true;
     }
 
-    /* KB0 = select */
     if (kb0 == 1) {
         if (setupSelectedItem == 0) {
+            /* Source: cycle */
+            setupSelectedSource = (setupSelectedSource + 1) % inputSourceCount;
+        } else {
             /* RECORD */
             action_start_recording(d, deckno);
-        } else {
-            /* Adjust mixer control inline */
-            int ci = setupSelectedItem - 1;
-            MixerControl *mc = &rec_mixer[ci];
-            bool adjusting = true;
-            needsUpdate = true;
-
-            long orig_val = mc->current;
-            int orig_enum = mc->currentEnumIndex;
-
-            while (adjusting) {
-                int mv = rotary_encoder_moved();
-                int bp = rotary_button_pressed();
-                int kb = kb0_button_pressed();
-
-                if (mv != 0) {
-                    if (mc->isVolume) {
-                        mc->current += mv;
-                        if (mc->current < mc->min) mc->current = mc->min;
-                        if (mc->current > mc->max) mc->current = mc->max;
-                        set_mixer_control("default", mc->name, mc->current);
-                    } else if (mc->isBoolean) {
-                        mc->current = !mc->current;
-                        set_mixer_control_boolean("default", mc->name, mc->current);
-                    } else if (mc->isEnum) {
-                        mc->currentEnumIndex = (mc->currentEnumIndex + mv +
-                                                mc->enumItemCount) % mc->enumItemCount;
-                        set_mixer_control_enum("default", mc->name, mc->currentEnumIndex);
-                    }
-                    needsUpdate = true;
-                }
-
-                /* KB0 = confirm */
-                if (kb == 1) adjusting = false;
-                /* Rotary click = cancel */
-                if (bp == 1) {
-                    if (mc->isVolume) {
-                        mc->current = orig_val;
-                        set_mixer_control("default", mc->name, mc->current);
-                    } else if (mc->isBoolean) {
-                        mc->current = orig_val;
-                        set_mixer_control_boolean("default", mc->name, mc->current);
-                    } else if (mc->isEnum) {
-                        mc->currentEnumIndex = orig_enum;
-                        set_mixer_control_enum("default", mc->name, mc->currentEnumIndex);
-                    }
-                    adjusting = false;
-                }
-
-                if (needsUpdate) {
-                    display_record_setup(d, deckno);
-                    needsUpdate = false;
-                }
-                usleep(50000); /* 20Hz update for level meter during adjustment */
-            }
-            needsUpdate = true;
+            return;
         }
+        needsUpdate = true;
     }
 
-    /* Rotary click = back to input source select */
     if (button_press == 1) {
-        close_input_peak_monitor();
-        currentDeckMenuState = DECK_MENU_RECORD_INPUT_SOURCE;
-        selectedItem = setupSelectedSource;
+        if (mainMenuState == MENU_RECORD) {
+            mainMenuState = MENU_MAIN;
+            currentDeckMenuState = DECK_MENU_MAIN;
+        } else {
+            currentDeckMenuState = DECK_MENU_LOAD_FILE;
+        }
+        selectedItem = 0;
         scrollOffset = 0;
         needsUpdate = true;
     }

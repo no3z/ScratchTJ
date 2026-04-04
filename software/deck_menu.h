@@ -12,9 +12,9 @@ typedef enum {
     DECK_MENU_INFO,
     DECK_MENU_BROWSE_FOLDERS,      // State for browsing folders
     DECK_MENU_BROWSE_FILES,        // State for browsing files in a folder
-    DECK_MENU_RECORD_INPUT_SOURCE, // State for selecting input source
-    DECK_MENU_RECORD_SETUP,        // State for recording setup (levels, controls)
-    DECK_MENU_RECORDING            // State for recording in progress
+    DECK_MENU_RECORD_SETUP,        // State for recording setup (source, levels, controls)
+    DECK_MENU_RECORDING,           // State for recording in progress
+    DECK_MENU_ADJUST_PITCH         // State for adjusting deck pitch
 } DeckMenuState;
 
 
@@ -38,6 +38,7 @@ void handle_menu_navigation(struct deck *d, int deckno, MenuItem *menuItems, int
 // Entry functions for sub-menus
 void enter_load_file_menu(struct deck *d, int deckno);
 void enter_adjust_volume(struct deck *d, int deckno);
+void enter_adjust_pitch(struct deck *d, int deckno);
 void enter_settings_menu(struct deck *d, int deckno);
 void enter_deck_info_display(struct deck *d, int deckno);
 

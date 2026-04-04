@@ -67,22 +67,20 @@ void lcd_menu_init(struct deck *deck_array[], int count) {
 void poll_rotary_encoder() {
     unsigned long now = menu_millis();
 
-    /* Update cue bar overlay with deck 2 cue data */
+    /* Update cue bar overlay with active deck cue data */
     if (deck_count >= 2) {
+        int ad = active_deck;
         double cue_positions[4];
         for (int i = 0; i < 4; i++)
-            cue_positions[i] = cues_get(&decks[1]->cues, i);
+            cue_positions[i] = cues_get(&decks[ad]->cues, i);
         oled_set_cue_overlay(cue_display_states, cue_positions);
     }
 
     handle_main_menu_navigation(decks, deck_count);
 
-    /* Auto-return to home after inactivity */
-    if (mainMenuState != MENU_HOME &&
-        (now - lastActivityTime) >= AUTO_RETURN_TIMEOUT_MS) {
-        mainMenuState = MENU_HOME;
-        needsUpdate = true;
-    }
+    /* Auto-return removed: rotary push = back is sufficient,
+     * and auto-return caused problems during recording and other
+     * functional screens (volume adjust, etc.) */
 
     /* Periodic redraw for home screen (live data at ~10fps) */
     if (mainMenuState == MENU_HOME &&
@@ -93,7 +91,11 @@ void poll_rotary_encoder() {
 
     if (needsUpdate) {
         display_main_menu(decks, deck_count);
-        needsUpdate = false;
+        /* display_deck_menu manages needsUpdate for deck submenus.
+         * For HOME/MAIN/other top-level screens, clear it here. */
+        if (mainMenuState == MENU_HOME || mainMenuState == MENU_MAIN ||
+            mainMenuState == MENU_CONTROLLER || mainMenuState == MENU_INFO)
+            needsUpdate = false;
     }
 }
 
@@ -144,24 +146,51 @@ int rotary_encoder_moved() {
     return 0;
 }
 
-/* Detects rotary button click: 1 on release, 0 otherwise (back button) */
+/* Detects rotary button: 1=short click (back), 2=long press (mode toggle)
+ * Faster debounce (30ms vs old 100ms) + long press at 500ms while held */
+#define ROTARY_DEBOUNCE_READS  6    /* ~30ms at 200Hz */
+#define ROTARY_ANTICHATTER_MS  150
+#define ROTARY_LONG_PRESS_MS   500
+
 int rotary_button_pressed() {
     static unsigned long lastRotRelease = 0;
-    bool buttonState = gpio_read(ROTARY_SW) == 0; /* active low */
+    static int pressedCount = 0;
+    static int releasedCount = 0;
+    static bool confirmed = false;
+    static bool longPressFired = false;
+    bool raw = gpio_read(ROTARY_SW) == 0; /* active low */
     unsigned long now = gpio_millis();
 
-    if (buttonState) {
-        if (lastButtonPressTime == 0) lastButtonPressTime = now;
-    } else {
-        if (lastButtonPressTime > 0 && (now - lastButtonPressTime) > 30) {
-            if ((now - lastRotRelease) > 100) {
-                lastButtonPressTime = 0;
-                lastRotRelease = now;
-                lastActivityTime = menu_millis();
-                return 1;  /* click = back */
-            }
+    if (raw) {
+        pressedCount++;
+        releasedCount = 0;
+        if (pressedCount >= ROTARY_DEBOUNCE_READS && !confirmed) {
+            confirmed = true;
+            lastButtonPressTime = now;
+            longPressFired = false;
         }
-        lastButtonPressTime = 0;
+        /* Long press: fire once at threshold while still held */
+        if (confirmed && !longPressFired &&
+            (now - lastButtonPressTime) >= ROTARY_LONG_PRESS_MS) {
+            longPressFired = true;
+            lastActivityTime = menu_millis();
+            return 2;  /* long press = mode toggle */
+        }
+    } else {
+        releasedCount++;
+        pressedCount = 0;
+        if (confirmed && releasedCount >= 3) {
+            confirmed = false;
+            if (!longPressFired && (now - lastRotRelease) > ROTARY_ANTICHATTER_MS) {
+                lastRotRelease = now;
+                lastButtonPressTime = 0;
+                lastActivityTime = menu_millis();
+                longPressFired = false;
+                return 1;  /* short click = back */
+            }
+            longPressFired = false;
+        }
+        if (releasedCount >= 5) { confirmed = false; longPressFired = false; }
     }
     return 0;
 }

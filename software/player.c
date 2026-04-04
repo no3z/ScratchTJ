@@ -256,7 +256,7 @@ void player_init(struct player *pl, unsigned int sample_rate,
 	pl->pitch = 0.0;
 	pl->sync_pitch = 1.0;
 	pl->volume = 0.0;
-	pl->setVolume = scsettings.initialVolume;
+	pl->setVolume = 1.0;
 	pl->GoodToGo = 0;
 	pl->samplesSoFar = 0;
 	pl->note_pitch = 1.0;
@@ -552,11 +552,13 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 			pl->faderVolume -= amountToDecay;
 	}
 
-	// Volume: matches SC1000 exactly
+	// Volume: pitch-based volume (SC1000 style), then apply gain separately
 	target_volume = fabs(pl->pitch) * VOLUME * pl->faderVolume;
-
 	if (target_volume > 1.0)
 		target_volume = 1.0;
+	target_volume *= pl->setVolume;  // gain after pitch clamp
+	if (target_volume > 4.0)
+		target_volume = 4.0;
 
 	/* Sync pitch is applied post-filtering */
 

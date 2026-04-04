@@ -12,15 +12,20 @@
 #include "cues.h"
 #include "sc_input.h"
 #include "shared_variables.h"
+#include "deck.h"
 
 extern bool needsUpdate;
 extern MainMenuState mainMenuState;
 
 /* Dynamic menu labels — Deck 2 first */
-static char menuLabelBuf[5][40];
-static const char *mainMenuOptions[5];
+static char menuLabelBuf[7][40];
+static const char *mainMenuOptions[7];
 static int selectedItem = 0;
-static int menuSize = 5;
+static int menuSize = 7;
+
+/* ── Function mode overlay state ──────────────────────────────── */
+static unsigned long mode_overlay_start_time = 0;
+#define MODE_OVERLAY_DURATION_MS 1500
 
 /* ── Cue flash state ──────────────────────────────────────────── */
 static int prev_cue_states[4] = {0, 0, 0, 0};
@@ -74,11 +79,127 @@ static void build_main_menu_labels(struct deck *decks[], int deck_count) {
     if (deck_count >= 1)
         build_deck_label(menuLabelBuf[1], sizeof(menuLabelBuf[1]),
                          decks[0], 1);
-    snprintf(menuLabelBuf[2], sizeof(menuLabelBuf[2]), "Record Dk2");
-    snprintf(menuLabelBuf[3], sizeof(menuLabelBuf[3]), "Config");
-    snprintf(menuLabelBuf[4], sizeof(menuLabelBuf[4]), "Info");
-    for (int i = 0; i < 5; i++)
+    snprintf(menuLabelBuf[2], sizeof(menuLabelBuf[2]), "Randomize");
+    snprintf(menuLabelBuf[3], sizeof(menuLabelBuf[3]), "Record Dk2");
+    snprintf(menuLabelBuf[4], sizeof(menuLabelBuf[4]), "Btn: %s",
+             current_function_mode == FUNC_MODE_SETTINGS ? "SETTINGS" : "CUE");
+    snprintf(menuLabelBuf[5], sizeof(menuLabelBuf[5]), "Config");
+    snprintf(menuLabelBuf[6], sizeof(menuLabelBuf[6]), "Info");
+    for (int i = 0; i < 7; i++)
         mainMenuOptions[i] = menuLabelBuf[i];
+}
+
+/* ── Function mode display helpers ─────────────────────────────── */
+
+static void draw_mode_overlay(void) {
+    unsigned long now = main_millis();
+    if (mode_overlay_start_time == 0) return;
+    unsigned long elapsed = now - mode_overlay_start_time;
+    if (elapsed >= MODE_OVERLAY_DURATION_MS) {
+        mode_overlay_start_time = 0;
+        return;
+    }
+
+    /* Dark box centered on platter area */
+    oled_fill_rect(10, 70, 220, 70, RGB565(10, 10, 30));
+    /* Border in deck accent color */
+    uint16_t color = (active_deck == 1) ? THEME_DECK2_ACCENT : THEME_DECK1_ACCENT;
+    oled_draw_line(10, 70, 229, 70, color);
+    oled_draw_line(10, 139, 229, 139, color);
+
+    /* Big label: DECK 1 or DECK 2 */
+    char label[16];
+    snprintf(label, sizeof(label), "DECK %d", active_deck + 1);
+    int tw = st7789_string_width(label, FONT_LARGE);
+    oled_text_color((DISPLAY_WIDTH - tw) / 2, 90, label, FONT_LARGE, color);
+
+    /* Subtitle: button mode */
+    const char *sub = (current_function_mode == FUNC_MODE_SETTINGS)
+                      ? "Buttons: SETTINGS" : "Buttons: CUE";
+    int sw = st7789_string_width(sub, FONT_SMALL);
+    oled_text_color((DISPLAY_WIDTH - sw) / 2, 118, sub, FONT_SMALL,
+                    RGB565(160, 160, 160));
+}
+
+static const char *settings_param_labels[4] = {
+    "PITCH", "SPEED", "START/STOP", "VOLUME"
+};
+static const char *settings_param_names[4] = {
+    NULL, "platterspeed", NULL, NULL
+};
+
+static void draw_settings_value_overlay(struct deck *d2) {
+    if (current_function_mode != FUNC_MODE_SETTINGS || settings_buttons_held == 0)
+        return;
+
+    /* Find first held button */
+    int btn = -1;
+    for (int i = 0; i < 4; i++) {
+        if (settings_buttons_held & (1 << i)) { btn = i; break; }
+    }
+    if (btn < 0) return;
+
+    /* Get current value */
+    float val = 0;
+    if (btn == 0) {
+        val = (float)d2->player.note_pitch;
+    } else if (btn == 2) {
+        /* Start/stop: no overlay needed, just return */
+        return;
+    } else if (btn == 3) {
+        val = (float)d2->player.setVolume;  /* gain multiplier */
+    } else if (settings_param_names[btn]) {
+        get_variable_value(settings_param_names[btn], &val);
+    }
+
+    /* Dark overlay on platter area */
+    oled_fill_rect(10, 40, 125, 80, RGB565(5, 5, 20));
+
+    /* Parameter name */
+    uint16_t accent = RGB565(0, 180, 255);
+    oled_text_color(18, 48, settings_param_labels[btn], FONT_MEDIUM, accent);
+
+    /* Large value */
+    char vbuf[16];
+    if (btn == 0) snprintf(vbuf, sizeof(vbuf), "%.3f", val);      /* pitch */
+    else if (btn == 1) snprintf(vbuf, sizeof(vbuf), "%.0f", val);  /* platterspeed */
+    else if (btn == 3) snprintf(vbuf, sizeof(vbuf), "x%.2f", val); /* gain */
+    else snprintf(vbuf, sizeof(vbuf), "%.1f", val);
+    oled_text_color(18, 72, vbuf, FONT_LARGE, COLOR_WHITE);
+
+    /* Visual gauge bar */
+    float norm = 0;
+    if (btn == 0) norm = (val - 0.25f) / 3.75f;  /* note_pitch 0.25-4.0 */
+    else if (btn == 1) norm = val / 32768.0f;      /* platterspeed */
+    else if (btn == 2) norm = 0;                    /* start/stop — no gauge */
+    else if (btn == 3) norm = val / 3.6f;            /* gain (max 3.6x) */
+    if (norm < 0) norm = 0;
+    if (norm > 1) norm = 1;
+    oled_draw_progress_bar(18, 100, 110, 6, norm, accent);
+}
+
+static void draw_function_mode_strip(int y) {
+    uint16_t bg = RGB565(15, 10, 30);
+    oled_fill_rect(0, y, DISPLAY_WIDTH, 14, bg);
+
+    if (current_function_mode == FUNC_MODE_CUE) {
+        oled_fill_rect(0, y, 3, 14, RGB565(255, 200, 0));
+        oled_text_color(6, y + 3, "CUE", FONT_SMALL, RGB565(255, 200, 0));
+        oled_text_color(32, y + 3, "1:J/S 2:J/S 3:J/S 4:J/S", FONT_SMALL,
+                        RGB565(120, 120, 120));
+    } else {
+        oled_fill_rect(0, y, 3, 14, RGB565(0, 180, 255));
+        oled_text_color(6, y + 3, "SET", FONT_SMALL, RGB565(0, 180, 255));
+        /* Color-coded button labels */
+        oled_text_color(32, y + 3, "1:", FONT_SMALL, THEME_CUE1_COLOR);
+        oled_text_color(48, y + 3, "Pit", FONT_SMALL, RGB565(160, 160, 160));
+        oled_text_color(76, y + 3, "2:", FONT_SMALL, THEME_CUE2_COLOR);
+        oled_text_color(92, y + 3, "Spd", FONT_SMALL, RGB565(160, 160, 160));
+        oled_text_color(120, y + 3, "3:", FONT_SMALL, THEME_CUE3_COLOR);
+        oled_text_color(136, y + 3, "S/S", FONT_SMALL, RGB565(160, 160, 160));
+        oled_text_color(168, y + 3, "4:", FONT_SMALL, THEME_CUE4_COLOR);
+        oled_text_color(184, y + 3, "Vol", FONT_SMALL, RGB565(160, 160, 160));
+    }
 }
 
 /* ── Home Screen — Deck 2 focused ─────────────────────────────── */
@@ -210,25 +331,36 @@ void display_home_screen(struct deck *decks[], int deck_count) {
 
     if (deck_count < 2) return;
 
-    struct deck *d2 = decks[1];
+    int ad = active_deck;
+    int other = 1 - ad;
+    struct deck *d_hero = decks[ad];
+    struct deck *d_other = decks[other];
+    uint16_t hero_accent = (ad == 1) ? THEME_DECK2_ACCENT : THEME_DECK1_ACCENT;
+    uint16_t other_accent = (ad == 1) ? THEME_DECK1_ACCENT : THEME_DECK2_ACCENT;
     char buf[40];
-    bool playing = player_is_active(&d2->player);
+    bool playing = player_is_active(&d_hero->player);
 
     /* ── Compact title bar (y=0..16) ─────────────────────────── */
     oled_fill_rect(0, 0, DISPLAY_WIDTH, 16, RGB565(0, 20, 40));
-    oled_fill_rect(0, 0, 4, 16, THEME_DECK2_ACCENT);
+    oled_fill_rect(0, 0, 4, 16, hero_accent);
 
-    snprintf(buf, sizeof(buf), "Dk2 %c %.16s",
-             playing ? '>' : '=', get_track_filename(d2));
+    snprintf(buf, sizeof(buf), "Dk%d %c %.16s",
+             ad + 1, playing ? '>' : '=', get_track_filename(d_hero));
     oled_text_color(8, 2, buf, FONT_SMALL, THEME_TEXT);
 
-    snprintf(buf, sizeof(buf), "%.2fx", d2->player.pitch);
+    snprintf(buf, sizeof(buf), "%.2fx", d_hero->player.pitch);
     int pw = st7789_string_width(buf, FONT_SMALL);
     oled_text_color(DISPLAY_WIDTH - pw - 4, 2, buf, FONT_SMALL,
-                    THEME_DECK2_ACCENT);
+                    hero_accent);
+
+    /* ── Mode indicator in title bar ─────────────────────────── */
+    if (current_function_mode == FUNC_MODE_SETTINGS) {
+        oled_fill_rect(DISPLAY_WIDTH - pw - 18, 4, 10, 8, RGB565(0, 180, 255));
+        oled_text_color(DISPLAY_WIDTH - pw - 17, 4, "S", FONT_SMALL, COLOR_WHITE);
+    }
 
     /* ── Large platter shifted left (y=18..148, cx=76, r=58) ── */
-    draw_platter(d2, 76, 83, 58, THEME_DECK2_ACCENT);
+    draw_platter(d_hero, 76, 83, 58, hero_accent);
 
     /* ── Info column right of platter (x=145..236) ───────────── */
     {
@@ -239,10 +371,10 @@ void display_home_screen(struct deck *decks[], int deck_count) {
         snprintf(buf, sizeof(buf), "Spd: %d", (int)ps_val);
         oled_text_color(145, 24, buf, FONT_SMALL, dim);
 
-        snprintf(buf, sizeof(buf), "Pitch: %.2fx", d2->player.pitch);
+        snprintf(buf, sizeof(buf), "Pitch: %.2fx", d_hero->player.pitch);
         oled_text_color(145, 38, buf, FONT_SMALL, dim);
 
-        snprintf(buf, sizeof(buf), "Motor: %.2f", d2->player.motor_speed);
+        snprintf(buf, sizeof(buf), "Motor: %.2f", d_hero->player.motor_speed);
         oled_text_color(145, 52, buf, FONT_SMALL, dim);
 
         float slip_val = 200.0f;
@@ -261,7 +393,7 @@ void display_home_screen(struct deck *decks[], int deck_count) {
 
         /* Push 1 sample per display frame → smooth 1px/frame scroll.
          * Visible window = FHIST_LEN * HOME_REDRAW_INTERVAL_MS (~2sec at 22ms) */
-        fader_history[fhist_idx] = d2->player.faderVolume;
+        fader_history[fhist_idx] = d_hero->player.faderVolume;
         fhist_idx = (fhist_idx + 1) % FHIST_LEN;
 
         /* Auto-zoom: find peak in history, scale so peak fills ~90% of graph */
@@ -306,8 +438,8 @@ void display_home_screen(struct deck *decks[], int deck_count) {
     }
 
     /* ── Full-width progress bar (y=150..156) — loop-aware ──── */
-    double elapsed_raw = d2->player.track ? player_get_elapsed(&d2->player) : 0.0;
-    double duration = get_track_duration(d2);
+    double elapsed_raw = d_hero->player.track ? player_get_elapsed(&d_hero->player) : 0.0;
+    double duration = get_track_duration(d_hero);
     double elapsed = (duration > 0) ? fmod(elapsed_raw, duration) : elapsed_raw;
     float progress = (duration > 0) ? (float)(elapsed / duration) : 0.0f;
     oled_draw_progress_bar(4, 150, 232, 6, progress, THEME_DECK2_ACCENT);
@@ -336,25 +468,25 @@ void display_home_screen(struct deck *decks[], int deck_count) {
                         remain < 30.0 ? RGB565(255, 80, 80) : RGB565(130, 130, 130));
     }
 
-    /* ── Deck 1 compact strip (y=176..194) ───────────────────── */
-    draw_deck_compact(decks[0], 1, THEME_DECK1_ACCENT, 176);
+    /* ── Other deck compact strip (y=176..194) ─────────────── */
+    draw_deck_compact(d_other, other + 1, other_accent, 176);
 
-    /* ── Cue flash logic ──────────────────────────────────────── */
+    /* ── Function mode info strip (y=196..210) ────────────────── */
+    draw_function_mode_strip(196);
+
+    /* ── Cue flash logic (y=212, moved from 198) ──────────────── */
     {
         unsigned long now = main_millis();
         for (int i = 0; i < 4; i++) {
-            /* Detect cue set transition → show banner */
             if (cue_display_states[i] == CUE_STATE_SET &&
                 prev_cue_states[i] != CUE_STATE_SET) {
                 cue_flash_idx = i;
                 cue_flash_time = now;
             }
-            /* Detect cue trigger transition → start color flash */
             if (cue_display_states[i] == CUE_STATE_ACTIVE &&
                 prev_cue_states[i] != CUE_STATE_ACTIVE) {
                 cue_trigger_time[i] = now;
             }
-            /* Revert triggered cue back to set after 300ms */
             if (cue_display_states[i] == CUE_STATE_ACTIVE &&
                 cue_trigger_time[i] > 0 &&
                 (now - cue_trigger_time[i]) >= 300) {
@@ -366,12 +498,18 @@ void display_home_screen(struct deck *decks[], int deck_count) {
         if (cue_flash_idx >= 0 && (now - cue_flash_time) < 500) {
             snprintf(buf, sizeof(buf), "CUE %d SET", cue_flash_idx + 1);
             int bw = st7789_string_width(buf, FONT_MEDIUM);
-            oled_text_color((DISPLAY_WIDTH - bw) / 2, 198, buf, FONT_MEDIUM,
+            oled_text_color((DISPLAY_WIDTH - bw) / 2, 212, buf, FONT_MEDIUM,
                             THEME_CUE_SET);
         } else {
             cue_flash_idx = -1;
         }
     }
+
+    /* ── Settings value overlay (on top of platter when adjusting) ── */
+    draw_settings_value_overlay(d_hero);
+
+    /* ── Mode overlay (big temporal label, drawn last) ──────────── */
+    draw_mode_overlay();
 
     /* Cue bar drawn by overlay in oled_flush() at y=220 */
     oled_flush();
@@ -420,10 +558,19 @@ void handle_main_menu_navigation(struct deck *decks[], int deck_count) {
         int button_press = rotary_button_pressed();
         int kb0 = kb0_button_pressed();
 
-        /* Rotary movement or short press or KB0 short → enter menu */
-        if (encoder_movement != 0 || button_press == 1 || kb0 == 1) {
+        /* Encoder turn or KB0 = enter main menu (forward/select) */
+        if (encoder_movement != 0 || kb0 == 1) {
             mainMenuState = MENU_MAIN;
             selectedItem = 0;
+            needsUpdate = true;
+        }
+
+        /* Short press on home = no-op (already at root) */
+
+        /* Long press = switch active deck */
+        if (button_press == 2) {
+            active_deck = 1 - active_deck;
+            mode_overlay_start_time = main_millis();
             needsUpdate = true;
         }
         return;
@@ -444,20 +591,37 @@ void handle_main_menu_navigation(struct deck *decks[], int deck_count) {
             switch (selectedItem) {
                 case 0: mainMenuState = MENU_DECK2; deck_menu_reset(); break;
                 case 1: mainMenuState = MENU_DECK1; deck_menu_reset(); break;
-                case 2: mainMenuState = MENU_RECORD;
+                case 2: /* Randomize both decks */
+                        deck_random_file(decks[0]);
+                        deck_random_file(decks[1]);
+                        mainMenuState = MENU_HOME;
+                        break;
+                case 3: mainMenuState = MENU_RECORD;
                         action_record(decks[1], 1);
                         break;
-                case 3: mainMenuState = MENU_CONTROLLER; break;
-                case 4: mainMenuState = MENU_INFO; break;
+                case 4: /* Toggle button mode CUE ↔ SETTINGS */
+                        current_function_mode = !current_function_mode;
+                        if (current_function_mode == FUNC_MODE_CUE)
+                            save_variables_to_file("/home/no3z/.scratchtj/config.cfg");
+                        break;
+                case 5: mainMenuState = MENU_CONTROLLER; break;
+                case 6: mainMenuState = MENU_INFO; break;
                 default: break;
             }
             selectedItem = 0;
             needsUpdate = true;
         }
 
-        /* Rotary click = back to home */
+        /* Rotary short click = back to home */
         if (button_press == 1) {
             mainMenuState = MENU_HOME;
+            needsUpdate = true;
+        }
+
+        /* Long press = switch active deck (works from any screen) */
+        if (button_press == 2) {
+            active_deck = 1 - active_deck;
+            mode_overlay_start_time = main_millis();
             needsUpdate = true;
         }
     } else {

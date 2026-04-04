@@ -471,6 +471,11 @@ static unsigned long cue_press_time[4] = {0, 0, 0, 0};
 int cue_display_states[4] = {CUE_STATE_EMPTY, CUE_STATE_EMPTY,
                               CUE_STATE_EMPTY, CUE_STATE_EMPTY};
 
+/* ── Function mode state ──────────────────────────────────────── */
+volatile FunctionMode current_function_mode = FUNC_MODE_SETTINGS;
+volatile uint8_t settings_buttons_held = 0;
+volatile int active_deck = 1;  /* default: Deck 2 (index 1) */
+
 /* ── Cue button processing ─────────────────────────────────────── */
 static unsigned long millis_now(void) {
     struct timespec ts;
@@ -483,6 +488,31 @@ static const int cue_pin_map[4] = {0, 2, 3, 1}; /* bit index → cue index */
 
 void process_cue_buttons(uint8_t button_byte) {
     unsigned long now = millis_now();
+
+    /* SETTINGS mode: track held buttons, skip cue operations */
+    if (current_function_mode == FUNC_MODE_SETTINGS) {
+        uint8_t prev_held = settings_buttons_held;
+        uint8_t held = 0;
+        for (int bit = 0; bit < 4; bit++) {
+            if ((button_byte >> bit) & 1)
+                held |= (1 << cue_pin_map[bit]);
+        }
+        /* Btn 2 (yellow, bit 2): start/stop toggle on rising edge */
+        if ((held & 0x04) && !(prev_held & 0x04)) {
+            int ad = active_deck;
+            deck[ad].player.stopped = !deck[ad].player.stopped;
+        }
+        settings_buttons_held = held;
+        /* Auto-save config when all buttons released after adjusting */
+        if (prev_held != 0 && held == 0)
+            save_variables_to_file("/home/no3z/.scratchtj/config.cfg");
+        last_button_byte = button_byte;
+        return;
+    }
+
+    /* CUE mode: clear settings state, run normal cue logic */
+    settings_buttons_held = 0;
+    int ad = active_deck;
 
     for (int bit = 0; bit < 4; bit++) {
         int i = cue_pin_map[bit]; /* cue index */
@@ -498,12 +528,12 @@ void process_cue_buttons(uint8_t button_byte) {
         if (cur && cue_press_time[i] > 0 &&
             (now - cue_press_time[i]) >= CUE_LONG_PRESS_MS &&
             cue_press_time[i] != 1) {
-            cues_set(&deck[1].cues, i, player_get_elapsed(&deck[1].player));
-            if (deck[1].player.track && deck[1].player.track->path)
-                cues_save_to_file(&deck[1].cues, deck[1].player.track->path);
+            cues_set(&deck[ad].cues, i, player_get_elapsed(&deck[ad].player));
+            if (deck[ad].player.track && deck[ad].player.track->path)
+                cues_save_to_file(&deck[ad].cues, deck[ad].player.track->path);
             cue_display_states[i] = CUE_STATE_SET;
             cue_press_time[i] = 1; /* mark as fired this press */
-            printf("Cue %d set\n", i + 1);
+            printf("Cue %d set (Dk%d)\n", i + 1, ad + 1);
         }
 
         /* Falling edge - button released */
@@ -511,18 +541,17 @@ void process_cue_buttons(uint8_t button_byte) {
             unsigned long held = (cue_press_time[i] == 1) ? CUE_LONG_PRESS_MS : (now - cue_press_time[i]);
             if (held < CUE_LONG_PRESS_MS) {
                 /* Short press: jump to cue if set */
-                double pos = cues_get(&deck[1].cues, i);
+                double pos = cues_get(&deck[ad].cues, i);
                 if (pos != CUE_UNSET) {
-                    player_seek_to(&deck[1].player, pos);
-                    /* Move position to cue point and resync encoder */
-                    deck[1].player.position = deck[1].player.position - deck[1].player.offset;
-                    deck[1].player.offset = 0.0;
+                    player_seek_to(&deck[ad].player, pos);
+                    deck[ad].player.position = deck[ad].player.position - deck[ad].player.offset;
+                    deck[ad].player.offset = 0.0;
                     float platterspeed;
                     get_variable_value("platterspeed", &platterspeed);
-                    deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
-                    deck[1].player.target_position = deck[1].player.position;
+                    deck[ad].angleOffset = (deck[ad].player.position * platterspeed) - deck[ad].encoderAngle;
+                    deck[ad].player.target_position = deck[ad].player.position;
                     cue_display_states[i] = CUE_STATE_ACTIVE;
-                    printf("Cue %d triggered\n", i + 1);
+                    printf("Cue %d triggered (Dk%d)\n", i + 1, ad + 1);
                 }
             }
         }
@@ -612,7 +641,7 @@ static void read_serial_data(void) {
 static void read_mt6701_angle(void) {
     int angle = mt6701_read_angle();
     if (angle >= 0) {
-        deck[1].newEncoderAngle = angle;
+        deck[active_deck].newEncoderAngle = angle;
     }
 }
 
@@ -645,107 +674,176 @@ void process_pic()
     }
 }
 
+/* ── Settings parameter adjustment via platter ────────────────── */
+#define SETTINGS_COUNTS_PER_STEP 200
+static int settings_accum[4] = {0, 0, 0, 0};
+
+/* Button 0 = note_pitch (direct), Button 1 = platterspeed (shared_var),
+ * Button 2 = start/stop (no platter adj), Button 3 = volume (direct/blue) */
+static const char *settings_adj_names[4] = {
+    NULL, "platterspeed", NULL, NULL
+};
+
+static void settings_adjust_parameter(int btn, int delta) {
+    settings_accum[btn] += delta;
+
+    int steps = settings_accum[btn] / SETTINGS_COUNTS_PER_STEP;
+    if (steps == 0) return;
+    settings_accum[btn] -= steps * SETTINGS_COUNTS_PER_STEP;
+
+    int ad = active_deck;
+    if (btn == 0) {
+        /* Pitch: note_pitch — finer step (0.005) */
+        double pitch = deck[ad].player.note_pitch;
+        pitch += steps * 0.005;
+        if (pitch < 0.25) pitch = 0.25;
+        if (pitch > 4.0) pitch = 4.0;
+        deck[ad].player.note_pitch = pitch;
+    } else if (btn == 3) {
+        /* Volume: setVolume (blue button), up to 150% */
+        double vol = deck[ad].player.setVolume;
+        vol += steps * 0.02;
+        if (vol < 0.0) vol = 0.0;
+        if (vol > 3.6) vol = 3.6;
+        deck[ad].player.setVolume = vol;
+    } else if (settings_adj_names[btn]) {
+        /* Shared variables: use their own stepSize and bounds */
+        float val;
+        if (get_variable_value(settings_adj_names[btn], &val)) {
+            int count;
+            EditableVariable *vars = get_editable_variables(&count);
+            for (int i = 0; i < count; i++) {
+                if (strcmp(vars[i].name, settings_adj_names[btn]) == 0) {
+                    val += steps * vars[i].stepSize;
+                    if (val < vars[i].minValue) val = vars[i].minValue;
+                    if (val > vars[i].maxValue) val = vars[i].maxValue;
+                    set_variable_value(settings_adj_names[btn], val);
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // Keep a running average of speed so if we suddenly let go it keeps going at that speed
 double averageSpeed = 0.0;
 unsigned int numBlips = 0;
 void process_rot()
 {
+	int ad = active_deck;
 	int8_t crossedZero;
 	int wrappedAngle = 0x0000;
 
 	if (scsettings.jogReverse) {
-		deck[1].newEncoderAngle = (ENCODER_CPR - 1) - deck[1].newEncoderAngle;
+		deck[ad].newEncoderAngle = (ENCODER_CPR - 1) - deck[ad].newEncoderAngle;
 	}
 
 	// First time, make sure there's no difference
-	if (deck[1].encoderAngle == 0xffff)
-		deck[1].encoderAngle = deck[1].newEncoderAngle;
+	if (deck[ad].encoderAngle == 0xffff)
+		deck[ad].encoderAngle = deck[ad].newEncoderAngle;
 
 	// Handle wrapping at zero (14-bit: quarter = CPR/4)
-	if (deck[1].newEncoderAngle < (ENCODER_CPR / 4) && deck[1].encoderAngle >= (ENCODER_CPR * 3 / 4))
+	if (deck[ad].newEncoderAngle < (ENCODER_CPR / 4) && deck[ad].encoderAngle >= (ENCODER_CPR * 3 / 4))
 	{
 		crossedZero = 1;
-		wrappedAngle = deck[1].encoderAngle - ENCODER_CPR;
+		wrappedAngle = deck[ad].encoderAngle - ENCODER_CPR;
 	}
-	else if (deck[1].newEncoderAngle >= (ENCODER_CPR * 3 / 4) && deck[1].encoderAngle < (ENCODER_CPR / 4))
+	else if (deck[ad].newEncoderAngle >= (ENCODER_CPR * 3 / 4) && deck[ad].encoderAngle < (ENCODER_CPR / 4))
 	{
 		crossedZero = -1;
-		wrappedAngle = deck[1].encoderAngle + ENCODER_CPR;
+		wrappedAngle = deck[ad].encoderAngle + ENCODER_CPR;
 	}
 	else
 	{
 		crossedZero = 0;
-		wrappedAngle = deck[1].encoderAngle;
+		wrappedAngle = deck[ad].encoderAngle;
 	}
 
 	// Blip threshold (configurable, needs 4x increase for 14-bit vs 12-bit)
 	float blipthreshold;
 	get_variable_value("blipthreshold", &blipthreshold);
-	if (abs(deck[1].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
+	if (abs(deck[ad].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
 	{
 		numBlips++;
 	}
 	else
 	{
 		numBlips = 0;
-		deck[1].encoderAngle = deck[1].newEncoderAngle;
+		deck[ad].encoderAngle = deck[ad].newEncoderAngle;
+
+		/* SETTINGS mode: divert platter to parameter adjustment */
+		if (settings_buttons_held != 0) {
+			int delta = deck[ad].newEncoderAngle - wrappedAngle;
+			for (int i = 0; i < 4; i++) {
+				if (settings_buttons_held & (1 << i))
+					settings_adjust_parameter(i, delta);
+			}
+			/* Release capTouch so player uses motor/slipmat path,
+			 * not position-tracking (which would freeze pitch to 0) */
+			deck[ad].player.capTouch = 0;
+			/* Resync offset for when user releases button and resumes scratching */
+			float ps;
+			get_variable_value("platterspeed", &ps);
+			deck[ad].angleOffset = (deck[ad].player.position * ps) - deck[ad].encoderAngle;
+			return;
+		}
 
 		if (pitchMode)
 		{
 			if (!oldPitchMode)
 			{
 				deck[(pitchMode - 1)].player.note_pitch = 1.0;
-				deck[1].angleOffset = -deck[1].encoderAngle;
+				deck[ad].angleOffset = -deck[ad].encoderAngle;
 				oldPitchMode = 1;
-				deck[1].player.capTouch = 0;
+				deck[ad].player.capTouch = 0;
 			}
 
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += ENCODER_CPR;
+				deck[ad].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= ENCODER_CPR;
+				deck[ad].angleOffset -= ENCODER_CPR;
 			}
 
-			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[1].encoderAngle + deck[1].angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
+			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[ad].encoderAngle + deck[ad].angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
 		}
 		else
 		{
 			if (scsettings.platterenabled)
 			{
-				if (capIsTouched || deck[1].player.motor_speed == 0.0)
+				if (capIsTouched || deck[ad].player.motor_speed == 0.0)
 				{
-					if (!deck[1].player.capTouch || oldPitchMode && !deck[1].player.stopped)
+					if (!deck[ad].player.capTouch || oldPitchMode && !deck[ad].player.stopped)
 					{
 						float platterspeed;
 						get_variable_value("platterspeed", &platterspeed);
-						deck[1].angleOffset = (deck[1].player.position * platterspeed) - deck[1].encoderAngle;
-						deck[1].player.target_position = deck[1].player.position;
-						deck[1].player.capTouch = 1;
+						deck[ad].angleOffset = (deck[ad].player.position * platterspeed) - deck[ad].encoderAngle;
+						deck[ad].player.target_position = deck[ad].player.position;
+						deck[ad].player.capTouch = 1;
 					}
 				}
 				else
 				{
-					deck[1].player.capTouch = 0;
+					deck[ad].player.capTouch = 0;
 				}
 			}
 			else
-				deck[1].player.capTouch = 1;
+				deck[ad].player.capTouch = 1;
 
 			if (crossedZero > 0)
 			{
-				deck[1].angleOffset += ENCODER_CPR;
+				deck[ad].angleOffset += ENCODER_CPR;
 			}
 			else if (crossedZero < 0)
 			{
-				deck[1].angleOffset -= ENCODER_CPR;
+				deck[ad].angleOffset -= ENCODER_CPR;
 			}
 
 				float platterspeed;
 			get_variable_value("platterspeed", &platterspeed);
-			deck[1].player.target_position = (double)(deck[1].encoderAngle + deck[1].angleOffset) / platterspeed;
+			deck[ad].player.target_position = (double)(deck[ad].encoderAngle + deck[ad].angleOffset) / platterspeed;
 		}
 		oldPitchMode = pitchMode;
 	}
