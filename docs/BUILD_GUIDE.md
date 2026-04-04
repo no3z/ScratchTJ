@@ -77,8 +77,8 @@ Every GPIO pin used by the system:
 | 8 | TFT CS (CE0) | SPI | Output |
 | 10 | TFT MOSI | SPI | Output |
 | 11 | TFT SCLK | SPI | Output |
-| 14 | Arduino TX→RX | UART | Output |
-| 15 | Arduino RX←TX | UART | Input |
+
+
 | 17 | KB0 button (back) | GPIO | Input (pull-up) |
 | 22 | Menu encoder DT | GPIO | Input |
 | 23 | Menu encoder CLK | GPIO | Input |

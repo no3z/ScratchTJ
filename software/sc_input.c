@@ -35,7 +35,7 @@
 #include "oled_display.h"
 
 /* ── Serial protocol constants ─────────────────────────────────── */
-#define SERIAL_DEV    "/dev/serial0"
+#define SERIAL_DEV    "/dev/ttyUSB0"
 #define SERIAL_BAUD   B500000
 #define SYNC_BYTE     0xAA
 #define HANDSHAKE_MAGIC 0x53

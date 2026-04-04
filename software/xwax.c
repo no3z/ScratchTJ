@@ -372,8 +372,8 @@ int main(int argc, char *argv[])
 	deck_load_folder(&deck[0], "/home/no3z/beats");
 	deck_load_folder(&deck[1], "/home/no3z/samples");	
 
-	register_variable("Fad Factor", &input_curveFactor, 0.1f, 10.0f, 0.1f);
-    register_variable("Fad Power", &input_curvePower, 0.1f, 10.0f, 0.1f);
+	register_variable("Fad Factor", &input_curveFactor, 0.01f, 10.0f, 0.01f);
+    register_variable("Fad Power", &input_curvePower, 0.01f, 10.0f, 0.01f);
 	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
 	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
 	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);

@@ -37,7 +37,7 @@ sudo raspi-config
 Enable:
 - **I2C** (for MT6701 encoder)
 - **SPI** (for ST7789 TFT display)
-- **Serial** (for Arduino Nano communication -- disable serial console, keep hardware UART)
+- **Serial** is no longer needed for Arduino communication (now uses USB serial via `/dev/ttyUSB0`)
 
 Reboot after changes.
 
@@ -150,15 +150,9 @@ Verify with: `i2cdetect -y 1` -- should show `06` at address 0x06.
 
 Buttons are active-low with internal pull-ups enabled.
 
-### Arduino Nano (Serial)
+### Arduino Nano (USB Serial)
 
-| Arduino Pin | Pi Pin |
-|---|---|
-| TX | GPIO 15 (RXD) |
-| RX | GPIO 14 (TXD) |
-| GND | GND |
-
-**Important:** Use a voltage divider or level shifter on the Arduino TX -> Pi RX line if your Nano runs at 5V. The Pi GPIO is 3.3V only.
+Connect the Arduino Nano to a Pi USB port with a USB cable. It appears as `/dev/ttyUSB0` (CH340 chip). No GPIO wiring or level shifters needed.
 
 ---
 
