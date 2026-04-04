@@ -111,22 +111,21 @@ HOME SCREEN
 │
 ├── Dk2 [▶/■] filename 0:00  .. Deck 2
 │   ├── Load File
-│   │   ├── Folder Browser ..... scroll folders, KB0 to enter
-│   │   └── File Browser ....... scroll files, KB0 to load
-│   │       ├── Start/Stop
-│   │       ├── Next File
-│   │       ├── Previous File
-│   │       ├── Random File
-│   │       ├── Next Folder
-│   │       ├── Previous Folder
-│   │       └── Record ......... enter recording workflow
-│   ├── Start/Stop .............. toggle playback
+│   │   ├── Start/Stop
+│   │   ├── Next File
+│   │   ├── Previous File
+│   │   ├── Random File
+│   │   ├── Next Folder
+│   │   ├── Previous Folder
+│   │   └── Record ............ enter recording workflow
+│   │   (KB0 enters folder/file browser for the selected action)
+│   ├── Start/Stop ............. toggle playback
 │   ├── Settings
 │   │   ├── Jog Pitch Mode ..... toggle pitch bend via platter
 │   │   ├── Toggle Jog Reverse . reverse platter direction
 │   │   └── Platter Speed ...... adjust encoder-to-audio ratio
 │   └── Info ................... filename, path, position, pitch,
-│                                touch state, motor speed, cue points
+│                                volume, touch state, motor speed, cue points
 │
 ├── Dk1 [▶/■] filename 0:00  .. Deck 1 (same structure as Deck 2)
 │
@@ -190,19 +189,19 @@ When holding a SETTINGS button and rotating the platter, a live overlay shows th
 
 All adjustable live from Config > Global Settings:
 
-| Parameter | Default | Range | Description |
-|-----------|---------|-------|-------------|
-| Fad Factor | 0.1 | 0.1 - 10 | Fader curve transition point |
-| Fad Power | 0.2 | 0.1 - 10 | Fader curve exponent |
-| Fad Switch | 1.0 | 0 - 1 | Fader direction (0=normal, 1=reversed) |
-| slippiness | 200 | 1 - 3000 | Slipmat simulation feel |
-| target_pitch | 15 | 1 - 240 | Position tracking gain |
-| brakespeed | 3000 | 1 - 10000 | Stop button deceleration rate |
-| platterspeed | 1333 | 1 - 8192 | Encoder-to-audio position ratio |
-| blipthreshold | 59 | 50 - 2048 | Encoder glitch rejection threshold |
-| pitch_filter | 0.2 | 0.01 - 1.0 | Pitch low-pass filter (0=smooth, 1=instant) |
-| cap_threshold | 5000 | 500 - 30000 | Capacitive touch activation level |
-| cap_hysteresis | 500 | 0 - 5000 | Touch on/off hysteresis band |
+| Parameter | Default | Range | Step | Description |
+|-----------|---------|-------|------|-------------|
+| Fad Factor | 0.1 | 0.01 - 10 | 0.01 | Fader curve transition point |
+| Fad Power | 0.2 | 0.01 - 10 | 0.01 | Fader curve exponent |
+| Fad Switch | 1.0 | 0 - 1 | 1.0 | Fader direction (0=normal, 1=reversed) |
+| slippiness | 200 | 1 - 3000 | 25 | Slipmat simulation feel |
+| target_pitch | 40 | 1 - 240 | 1 | Position tracking gain |
+| brakespeed | 3000 | 1 - 10000 | 500 | Stop button deceleration rate |
+| platterspeed | 9100 | 1 - 32768 | 256 | Encoder-to-audio position ratio |
+| blipthreshold | 400 | 50 - 2048 | 50 | Encoder glitch rejection threshold |
+| pitch_filter | 0.1 | 0.01 - 1.0 | 0.01 | Pitch low-pass filter (0=smooth, 1=instant) |
+| fader_sharp | 1.0 | 0 - 1.0 | 0.05 | Fader sharpness |
+| fhist_secs | 2.0 | 0.1 - 120 | 0.1 | Fader history graph time window (seconds) |
 
 ### Serial Protocol
 

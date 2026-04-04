@@ -140,15 +140,15 @@ Verify with: `i2cdetect -y 1` -- should show `06` at address 0x06.
 
 ### Buttons
 
-| Button | Pi Pin | Color |
+| Button | Pin | Color |
 |---|---|---|
-| KB0 (back) | GPIO 17 | -- |
-| Cue 1 | Via MCP23017 or direct GPIO | Red |
-| Cue 2 | Via MCP23017 or direct GPIO | Green |
-| Cue 3 | Via MCP23017 or direct GPIO | Yellow |
-| Cue 4 | Via MCP23017 or direct GPIO | Blue |
+| KB0 (select/confirm) | Pi GPIO 17 | -- |
+| Cue 1 | Arduino A0 | Red |
+| Cue 2 | Arduino A1 | Green |
+| Cue 3 | Arduino A2 | Yellow |
+| Cue 4 | Arduino A3 | Blue |
 
-Buttons are active-low with internal pull-ups enabled.
+KB0 is active-low with internal pull-up on the Pi. Cue buttons are active-low with internal pull-ups on the Arduino, sent to the Pi as a 4-bit bitfield in the serial packet.
 
 ### Arduino Nano (USB Serial)
 
@@ -216,15 +216,18 @@ Edit `scsettings.txt` in the software directory, or use the on-device Controller
 
 ### Key Parameters
 
-| Parameter | Default | Description |
-|---|---|---|
-| `buffersize` | 1024 | Audio buffer size (samples) |
-| `platterspeed` | 9100 | Encoder-to-audio ratio (9100 = 33rpm for 14-bit) |
-| `brakespeed` | 3000 | Stop deceleration time |
-| `faderopenpoint` | 5 | Fader open threshold |
-| `faderclosepoint` | 3 | Fader close threshold |
-| `pitchrange` | 50 | Pitch bend range (%) |
-| `platterenabled` | 1 | Enable/disable platter (0/1) |
+| Parameter | Default | Range | Description |
+|---|---|---|---|
+| `platterspeed` | 9100 | 1 - 32768 | Encoder-to-audio position ratio |
+| `brakespeed` | 3000 | 1 - 10000 | Stop button deceleration rate |
+| `slippiness` | 200 | 1 - 3000 | Slipmat simulation feel |
+| `target_pitch` | 40 | 1 - 240 | Position tracking gain |
+| `blipthreshold` | 400 | 50 - 2048 | Encoder glitch rejection threshold |
+| `pitch_filter` | 0.1 | 0.01 - 1.0 | Pitch low-pass filter |
+| `Fad Factor` | 0.1 | 0.01 - 10 | Fader curve transition point |
+| `Fad Power` | 0.2 | 0.01 - 10 | Fader curve exponent |
+| `fader_sharp` | 1.0 | 0 - 1.0 | Fader sharpness |
+| `platterenabled` | 1 | 0 - 1 | Enable/disable platter |
 
 ### Presets
 

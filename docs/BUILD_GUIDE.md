@@ -42,9 +42,8 @@ This is the full signal path -- every connection between components:
                           │                                             │
                           │  GPIO 17       ◄── KB0 Button (back)       │
                           │                                             │
-                          │  GPIO 14 (TXD) ──►┐                        │
-                          │  GPIO 15 (RXD) ◄──┤ UART 500kbaud          │
-                          └───────────────────┼────────────────────────┘
+                          │  USB ◄──────────────── USB Serial 500kbaud  │
+                          └───────────────────┬────────────────────────┘
                                               │
                                               ▼
                                     ┌─────────────────┐
@@ -62,7 +61,7 @@ This is the full signal path -- every connection between components:
                                     └─────────────────┘  (user touches)
 ```
 
-**Important:** The Arduino Nano TX (5V) connects to Pi RX (3.3V). Use a voltage divider or level shifter on this line to avoid damaging the Pi GPIO.
+**Note:** The Arduino connects to the Pi via USB cable (CH340 USB-serial chip). No GPIO serial wiring or level shifters needed.
 
 ---
 
@@ -77,9 +76,7 @@ Every GPIO pin used by the system:
 | 8 | TFT CS (CE0) | SPI | Output |
 | 10 | TFT MOSI | SPI | Output |
 | 11 | TFT SCLK | SPI | Output |
-
-
-| 17 | KB0 button (back) | GPIO | Input (pull-up) |
+| 17 | KB0 button (select/confirm) | GPIO | Input (pull-up) |
 | 22 | Menu encoder DT | GPIO | Input |
 | 23 | Menu encoder CLK | GPIO | Input |
 | 24 | TFT DC | GPIO | Output |
@@ -92,7 +89,7 @@ Every GPIO pin used by the system:
 | D10 | Cap touch send | CapacitiveSensor library |
 | D12 | Cap touch sense | Via 1.2kΩ to D10 |
 | A0--A3 | Cue buttons 1--4 | Digital read, internal pull-up |
-| TX | Serial to Pi | 500,000 baud |
+| USB | Serial to Pi | 500,000 baud via CH340 (`/dev/ttyUSB0`) |
 
 ---
 
@@ -376,13 +373,9 @@ The Nano sits in a friction-fit 3D printed cradle inside the enclosure. The USB 
 
 ### Serial connection
 
-| Arduino Pin | Pi Pin | Notes |
-|-------------|--------|-------|
-| TX | GPIO 15 (RXD) | **Needs level shifter** (5V → 3.3V) |
-| RX | GPIO 14 (TXD) | OK direct (3.3V is valid HIGH for 5V Arduino) |
-| GND | GND | Common ground |
+Connect the Arduino Nano to one of the Pi's USB ports with a USB cable. The CH340 USB-serial chip on the Nano appears as `/dev/ttyUSB0`. The USB cable provides both data and 5V power -- no separate wiring needed.
 
-Baud rate: **500,000**. Disable the Pi serial console in `raspi-config` but keep the hardware UART enabled.
+Baud rate: **500,000**. No GPIO serial or `raspi-config` serial setup required.
 
 ### Packet format (7 bytes)
 
@@ -439,7 +432,7 @@ Enable SPI in `raspi-config`. Test with: `make test_tft_ui && sudo ./test_tft_ui
 | SW (push) | GPIO 27 |
 | GND | GND |
 
-Rotation scrolls menu items. Push button confirms selection. Long-press enters Pitch Mode.
+Rotation scrolls menu items. Short press = back/cancel. Long press (500ms) = switch active deck.
 
 ### KB0 button
 
@@ -447,7 +440,7 @@ Rotation scrolls menu items. Push button confirms selection. Long-press enters P
 |--------|--------|
 | KB0 (back) | GPIO 17 |
 
-Short press = back/exit. Long press = return to home screen. Active-low with internal pull-up.
+Short press = select/confirm/enter submenu. Active-low with internal pull-up.
 
 ### Cue buttons (on Arduino)
 
@@ -458,7 +451,7 @@ Short press = back/exit. Long press = return to home screen. Active-low with int
 | Cue 3 | A2 |
 | Cue 4 | A3 |
 
-Active-low with internal pull-ups. Button states are sent to the Pi as a 4-bit bitfield in byte 5 of the serial packet. In the Cue screen: short press = jump to cue point, long press = set cue point at current position.
+Active-low with internal pull-ups. Button states are sent to the Pi as a 4-bit bitfield in byte 5 of the serial packet. Button behavior depends on the active function mode: in **CUE mode**, short press = jump to cue point, long press = set cue. In **SETTINGS mode**, buttons control pitch, platter speed, start/stop, and volume (hold + rotate platter to adjust).
 
 ---
 
