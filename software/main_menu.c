@@ -122,7 +122,7 @@ static void draw_mode_overlay(void) {
 }
 
 static const char *settings_param_labels[4] = {
-    "PITCH", "SPEED", "START/STOP", "VOLUME"
+    "PITCH", "SPEED", "BEND", "VOLUME"
 };
 static const char *settings_param_names[4] = {
     NULL, "platterspeed", NULL, NULL
@@ -144,8 +144,7 @@ static void draw_settings_value_overlay(struct deck *d2) {
     if (btn == 0) {
         val = (float)d2->player.note_pitch;
     } else if (btn == 2) {
-        /* Start/stop: no overlay needed, just return */
-        return;
+        val = (float)d2->player.fader_pitch;  /* bend ±8% */
     } else if (btn == 3) {
         val = (float)d2->player.setVolume;  /* gain multiplier */
     } else if (settings_param_names[btn]) {
@@ -161,18 +160,19 @@ static void draw_settings_value_overlay(struct deck *d2) {
 
     /* Large value */
     char vbuf[16];
-    if (btn == 0) snprintf(vbuf, sizeof(vbuf), "%.3f", val);      /* pitch */
-    else if (btn == 1) snprintf(vbuf, sizeof(vbuf), "%.0f", val);  /* platterspeed */
-    else if (btn == 3) snprintf(vbuf, sizeof(vbuf), "x%.2f", val); /* gain */
+    if (btn == 0) snprintf(vbuf, sizeof(vbuf), "%.3f", val);                 /* pitch */
+    else if (btn == 1) snprintf(vbuf, sizeof(vbuf), "%.0f", val);             /* platterspeed */
+    else if (btn == 2) snprintf(vbuf, sizeof(vbuf), "%+.1f%%", (val - 1.0f) * 100.0f); /* bend % */
+    else if (btn == 3) snprintf(vbuf, sizeof(vbuf), "x%.2f", val);            /* gain */
     else snprintf(vbuf, sizeof(vbuf), "%.1f", val);
     oled_text_color(18, 72, vbuf, FONT_LARGE, COLOR_WHITE);
 
     /* Visual gauge bar */
     float norm = 0;
-    if (btn == 0) norm = (val - 0.25f) / 3.75f;  /* note_pitch 0.25-4.0 */
-    else if (btn == 1) norm = val / 32768.0f;      /* platterspeed */
-    else if (btn == 2) norm = 0;                    /* start/stop — no gauge */
-    else if (btn == 3) norm = val / 3.6f;            /* gain (max 3.6x) */
+    if (btn == 0) norm = (val - 0.25f) / 3.75f;          /* note_pitch 0.25-4.0 */
+    else if (btn == 1) norm = val / 32768.0f;             /* platterspeed */
+    else if (btn == 2) norm = (val - 0.92f) / 0.16f;      /* bend 0.92-1.08 (centered ±8%) */
+    else if (btn == 3) norm = val / 8.0f;                 /* gain (max 8x with soft-clip) */
     if (norm < 0) norm = 0;
     if (norm > 1) norm = 1;
     oled_draw_progress_bar(18, 100, 110, 6, norm, accent);

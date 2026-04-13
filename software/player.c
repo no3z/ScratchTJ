@@ -50,6 +50,14 @@
 
 #define VOLUME (7.0 / 8)
 
+/* Soft saturation curve (analog-style limiter).
+ * Maps any input to (-SHRT_MAX, +SHRT_MAX) smoothly via tanh.
+ * Linear up to ~50% of full scale, then progressively compresses,
+ * adding warm odd-harmonic distortion instead of harsh digital clipping. */
+static inline double soft_clip(double v) {
+    return tanh(v * (1.0 / SHRT_MAX)) * SHRT_MAX;
+}
+
 // Time in seconds fader takes to decay (matches SC1000)
 #define FADERDECAY 0.020
 #define DECAYSAMPLES FADERDECAY * 48000
@@ -173,18 +181,10 @@ static double build_pcm(signed short *pcm, unsigned samples, double sample_dt,
 
 			v = vol * cubic_interpolate(i[c], f) + dither();
 
-			if (v > SHRT_MAX)
-			{
-				*pcm++ = SHRT_MAX;
-			}
-			else if (v < SHRT_MIN)
-			{
-				*pcm++ = SHRT_MIN;
-			}
-			else
-			{
-				*pcm++ = (signed short)v;
-			}
+			/* Soft saturation: smooth tanh curve instead of hard clipping.
+			 * Allows volumes > 1.0 to add warm harmonic distortion rather
+			 * than fizzy digital clipping. */
+			*pcm++ = (signed short)soft_clip(v);
 		}
 
 		sample += step;
@@ -557,8 +557,11 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	if (target_volume > 1.0)
 		target_volume = 1.0;
 	target_volume *= pl->setVolume;  // gain after pitch clamp
-	if (target_volume > 4.0)
-		target_volume = 4.0;
+	/* Ceiling raised to 8.0 since soft_clip() in build_pcm handles
+	 * saturation gracefully. Above ~1.0 you get progressive warm
+	 * distortion instead of hard digital clipping. */
+	if (target_volume > 8.0)
+		target_volume = 8.0;
 
 	/* Sync pitch is applied post-filtering */
 
