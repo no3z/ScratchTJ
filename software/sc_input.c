@@ -31,6 +31,8 @@
 #include "midi.h"
 #include "lcd_menu.h"
 #include <termios.h>
+#include <linux/serial.h>
+#include <sys/ioctl.h>
 #include "shared_variables.h"
 #include "oled_display.h"
 
@@ -109,6 +111,16 @@ void init_serial(const char *port_name) {
         exit(EXIT_FAILURE);
     }
     tcflush(serial_fd, TCIOFLUSH);
+
+    /* Enable low-latency mode (bypass 16ms kernel buffer) */
+    struct serial_struct serial_info;
+    if (ioctl(serial_fd, TIOCGSERIAL, &serial_info) == 0) {
+        serial_info.flags |= ASYNC_LOW_LATENCY;
+        if (ioctl(serial_fd, TIOCSSERIAL, &serial_info) == 0)
+            printf("Serial low-latency mode enabled.\n");
+        else
+            perror("Warning: could not set low-latency mode");
+    }
 
     /* Send handshake */
     uint8_t hs = HANDSHAKE_MAGIC;
@@ -497,11 +509,8 @@ void process_cue_buttons(uint8_t button_byte) {
             if ((button_byte >> bit) & 1)
                 held |= (1 << cue_pin_map[bit]);
         }
-        /* Btn 2 (yellow, bit 2): start/stop toggle on rising edge */
-        if ((held & 0x04) && !(prev_held & 0x04)) {
-            int ad = active_deck;
-            deck[ad].player.stopped = !deck[ad].player.stopped;
-        }
+        /* Btn 2 (yellow, bit 2) in SETTINGS mode: hold + spin = bend (fader_pitch),
+         * turntable-style ±8% for beat sync. No tap action. */
         settings_buttons_held = held;
         /* Auto-save config when all buttons released after adjusting */
         if (prev_held != 0 && held == 0)
@@ -656,11 +665,12 @@ void process_pic()
 	float curvePower;
     get_variable_value("Fad Power", &curvePower);
 
-    /* Deadzone at extremes: hard-cut below 2% or above 98% */
-    if (fader < 0.02) {
+    /* Deadzone at extremes: hard-cut below 0.5% or above 99.5%
+     * (matches SC500 faderopenpoint=5/1023 ≈ 0.49% for Innofader Mini Pro) */
+    if (fader < 0.005) {
         deck[0].player.faderTarget = 0.0;
         deck[1].player.faderTarget = 1.0;
-    } else if (fader > 0.98) {
+    } else if (fader > 0.995) {
         deck[0].player.faderTarget = 1.0;
         deck[1].player.faderTarget = 0.0;
     } else if (fader <= 0.5) {
@@ -678,11 +688,25 @@ void process_pic()
 #define SETTINGS_COUNTS_PER_STEP 200
 static int settings_accum[4] = {0, 0, 0, 0};
 
-/* Button 0 = note_pitch (direct), Button 1 = platterspeed (shared_var),
- * Button 2 = start/stop (no platter adj), Button 3 = volume (direct/blue) */
+/* Button 0 = note_pitch (fine, for tuning),
+ * Button 1 = platterspeed (shared_var),
+ * Button 2 = fader_pitch (turntable-style bend ±8%, for beat sync),
+ * Button 3 = setVolume (blue button, up to 800%) */
 static const char *settings_adj_names[4] = {
     NULL, "platterspeed", NULL, NULL
 };
+
+/* Acceleration based on platter spin speed.
+ * |delta| is the raw encoder counts received in this call.
+ * Slow platter → multiplier ~1.0 (fine control for beat sync).
+ * Fast platter → up to ×10 (coarse adjustment). */
+static double platter_accel(int delta) {
+    int abs_d = delta < 0 ? -delta : delta;
+    double accel = (double)abs_d / 20.0;
+    if (accel < 1.0) accel = 1.0;
+    if (accel > 10.0) accel = 10.0;
+    return accel;
+}
 
 static void settings_adjust_parameter(int btn, int delta) {
     settings_accum[btn] += delta;
@@ -691,30 +715,39 @@ static void settings_adjust_parameter(int btn, int delta) {
     if (steps == 0) return;
     settings_accum[btn] -= steps * SETTINGS_COUNTS_PER_STEP;
 
+    double accel = platter_accel(delta);
     int ad = active_deck;
     if (btn == 0) {
-        /* Pitch: note_pitch — finer step (0.005) */
+        /* Pitch: note_pitch — very fine step (0.001), for musical tuning */
         double pitch = deck[ad].player.note_pitch;
-        pitch += steps * 0.005;
+        pitch += steps * 0.001 * accel;
         if (pitch < 0.25) pitch = 0.25;
         if (pitch > 4.0) pitch = 4.0;
         deck[ad].player.note_pitch = pitch;
+    } else if (btn == 2) {
+        /* Bend: fader_pitch — turntable-style ±8% (0.92–1.08), for beat sync
+         * Persistent until reset; very fine step lets you nudge 0.1% at a time */
+        double bend = deck[ad].player.fader_pitch;
+        bend += steps * 0.001 * accel;
+        if (bend < 0.92) bend = 0.92;
+        if (bend > 1.08) bend = 1.08;
+        deck[ad].player.fader_pitch = bend;
     } else if (btn == 3) {
-        /* Volume: setVolume (blue button), up to 150% */
+        /* Volume: setVolume — up to 800% */
         double vol = deck[ad].player.setVolume;
-        vol += steps * 0.02;
+        vol += steps * 0.02 * accel;
         if (vol < 0.0) vol = 0.0;
-        if (vol > 3.6) vol = 3.6;
+        if (vol > 8.0) vol = 8.0;
         deck[ad].player.setVolume = vol;
     } else if (settings_adj_names[btn]) {
-        /* Shared variables: use their own stepSize and bounds */
+        /* Shared variables: use their own stepSize and bounds, with accel */
         float val;
         if (get_variable_value(settings_adj_names[btn], &val)) {
             int count;
             EditableVariable *vars = get_editable_variables(&count);
             for (int i = 0; i < count; i++) {
                 if (strcmp(vars[i].name, settings_adj_names[btn]) == 0) {
-                    val += steps * vars[i].stepSize;
+                    val += steps * vars[i].stepSize * accel;
                     if (val < vars[i].minValue) val = vars[i].minValue;
                     if (val > vars[i].maxValue) val = vars[i].maxValue;
                     set_variable_value(settings_adj_names[btn], val);
