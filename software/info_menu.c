@@ -143,7 +143,7 @@ void display_network_info() {
     if (ftp_up) {
         oled_text_color(8, y, "FTP: beats + samples", FONT_SMALL, THEME_TEXT);
         oled_textf(8, y + 14, FONT_SMALL, "ftp://<address>  port %d", FTP_PORT);
-        oled_text_color(8, y + 28, "user: no3z", FONT_SMALL, THEME_TEXT);
+        oled_text_color(8, y + 28, "user: anonymous (or no3z)", FONT_SMALL, THEME_TEXT);
         oled_text_color(8, y + 46, "Restart to see new files", FONT_SMALL, THEME_RANGE_FG);
     } else {
         oled_text_color(8, y, "FTP server not running", FONT_SMALL, THEME_STOPPED);

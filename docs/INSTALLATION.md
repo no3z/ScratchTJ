@@ -69,7 +69,7 @@ To manage the `beats` and `samples` folders over the network, run once on the Pi
 bash ~/ScratchTJ/docs/setup_ftp.sh
 ```
 
-This installs `vsftpd`, limited to the user `no3z` (log in with the Pi password) and to those two folders. The address is shown on the device under **Info > Network / FTP**. FTP is unencrypted: use it on your own network only. New files are picked up the next time xwax starts.
+This installs `vsftpd`, limited to those two folders. Log in as `anonymous` (no password) or as `no3z` with the Pi password; both can upload, rename and delete, so anyone on the network can change the music folders (the script says how to make anonymous read-only). The address is shown on the device under **Info > Network / FTP**. FTP is unencrypted: use it on your own network only. New files are picked up the next time xwax starts.
 
 ---
 

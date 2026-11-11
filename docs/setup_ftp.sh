@@ -22,13 +22,28 @@ sudo tee /etc/vsftpd.conf >/dev/null <<'EOF'
 listen=YES
 listen_ipv6=NO
 
-# Log in as the Pi user; no anonymous access
-anonymous_enable=NO
+# Log in as the Pi user (with the Pi password)...
 local_enable=YES
 write_enable=YES
 local_umask=022
 
-# Only no3z may log in, and sees nothing but the two music folders
+# ...or as "anonymous", with no password. Anonymous sessions act as no3z,
+# so files uploaded either way have the same owner, and may upload,
+# rename and delete. Anyone on the network can therefore change the
+# music folders: to make anonymous read-only, set the three anon_*_enable
+# options below to NO.
+anonymous_enable=YES
+no_anon_password=YES
+ftp_username=no3z
+anon_root=/srv/scratchtj
+anon_upload_enable=YES
+anon_mkdir_write_enable=YES
+anon_other_write_enable=YES
+anon_world_readable_only=NO
+anon_umask=022
+
+# Only these logins are accepted, and they see nothing but the two
+# music folders
 userlist_enable=YES
 userlist_deny=NO
 userlist_file=/etc/vsftpd.userlist
@@ -48,7 +63,7 @@ secure_chroot_dir=/var/run/vsftpd/empty
 pam_service_name=vsftpd
 seccomp_sandbox=NO
 EOF
-echo no3z | sudo tee /etc/vsftpd.userlist >/dev/null
+printf 'no3z\nanonymous\nftp\n' | sudo tee /etc/vsftpd.userlist >/dev/null
 sudo systemctl enable vsftpd >/dev/null 2>&1
 sudo systemctl restart vsftpd
 sleep 1
