@@ -150,6 +150,8 @@ Provides file browsing, playback control, volume adjustment, and recording for e
 - **Global Settings** -- all registered shared variables with real-time editing
 - **Save Config** -- persist current settings to file
 - **Reset Defaults** -- restore factory defaults
+- **Restart (rescan files)** -- restart xwax in place so it re-reads the beats and samples folders (same as `sudo kill -USR1 $(pgrep xwax)`)
+- **Reboot Pi** -- reboot the whole device
 
 ### preset_menu.c -- Preset System
 

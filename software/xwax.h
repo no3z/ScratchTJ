@@ -99,4 +99,9 @@ typedef struct SC_SETTINGS {
 } SC_SETTINGS;
 
 extern SC_SETTINGS scsettings;
+
+/* Replace the running program with a fresh copy of itself, which reads
+ * the beats and samples folders again. Returns only if that failed.
+ * Also triggered by sending the process SIGUSR1. */
+void xwax_restart_in_place(void);
 #endif

@@ -147,11 +147,14 @@ HOME SCREEN
 │   │   └── (per variable) ..... value adjust with min/max/step
 │   │       (fader variables show live curve graph)
 │   ├── Save Config ............ writes to ~/.scratchtj/config.cfg
-│   └── Reset Defaults ......... restores all to factory values
+│   ├── Reset Defaults ......... restores all to factory values
+│   ├── Restart (rescan files) . restarts xwax so it re-reads beats/samples
+│   └── Reboot Pi .............. reboots the whole device
 │
 └── Info
     ├── CPU/Mem ................ live CPU and memory usage
-    └── Version ................ "ScratchTJ v2" + build date
+    ├── Version ................ "ScratchTJ v2" + build date
+    └── Network / FTP .......... IP addresses and FTP server status
 ```
 
 ### Navigation Controls

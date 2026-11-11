@@ -18,6 +18,7 @@
  */
 
 #include <assert.h>
+#include <limits.h>
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -294,6 +295,37 @@ void sig_handler(int signo)
 	}
 }
 
+/* Absolute path of this program, for restarting it */
+static char program_path[PATH_MAX];
+
+void xwax_restart_in_place(void)
+{
+	/* The new program must find the sound card, serial port and display
+	 * free. Marking every descriptor close-on-exec releases them at the
+	 * instant of the exec; closing them here instead would pull them out
+	 * from under the audio thread while it is still running.
+	 *
+	 * Only async-signal-safe calls here: this also runs from the SIGUSR1
+	 * handler. */
+	for (int fd = 3; fd < 1024; fd++)
+	{
+		int flags = fcntl(fd, F_GETFD);
+		if (flags != -1)
+			fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+	}
+
+	/* By path first, so a freshly built binary is picked up; the copy
+	 * we are running from is the fallback */
+	if (program_path[0])
+		execl(program_path, program_path, (char *)NULL);
+	execl("/proc/self/exe", "xwax", (char *)NULL);
+}
+
+static void restart_handler(int signo)
+{
+	xwax_restart_in_place();
+}
+
 int main(int argc, char *argv[])
 {
 
@@ -307,6 +339,12 @@ int main(int argc, char *argv[])
 		printf("\ncan't catch SIGINT\n");
 		exit(1);
 	}
+
+	if (realpath(argv[0], program_path) == NULL)
+		program_path[0] = '\0';
+
+	/* kill -USR1 restarts in place, e.g. after copying files over FTP */
+	signal(SIGUSR1, restart_handler);
 
 	if (setlocale(LC_ALL, "") == NULL)
 	{

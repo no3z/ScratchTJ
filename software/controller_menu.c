@@ -5,6 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
 #include "sc_input.h"
 #include "xwax.h"
 #include "shared_variables.h"
@@ -30,7 +32,9 @@ static const char *controllerOptions[] = {
     "Sound Settings",
     "Global Settings",
     "Save Config",
-    "Reset Defaults"
+    "Reset Defaults",
+    "Restart (rescan files)",
+    "Reboot Pi"
 };
 
 /* Forward declarations */
@@ -39,6 +43,8 @@ static void adjust_variable_value(EditableVariable *variable);
 static void display_mixer_control(MixerControl *control);
 static void action_save_config(void);
 static void action_reset_defaults(void);
+static void action_restart(void);
+static void action_reboot(void);
 
 /* Display Controller Menu */
 void display_controller_menu(struct deck *d, int deck_no) {
@@ -75,6 +81,12 @@ void handle_controller_menu_navigation(struct deck *d, int deckno) {
                 break;
             case CONTROLLER_RESET_DEFAULTS:
                 action_reset_defaults();
+                break;
+            case CONTROLLER_RESTART:
+                action_restart();
+                break;
+            case CONTROLLER_REBOOT:
+                action_reboot();
                 break;
             default:
                 break;
@@ -371,4 +383,71 @@ static void action_save_config(void) {
 static void action_reset_defaults(void) {
     reset_all_variables_to_defaults();
     show_confirm_screen("Defaults Reset", "Press any button");
+}
+
+/* Ask before doing something disruptive.
+ * Return: true if KB0 was pressed (yes), false on rotary click (cancel) */
+static bool confirm_action(const char *question) {
+    oled_clear();
+    oled_draw_confirm(question, "KB0=yes ROT=no");
+    oled_flush();
+
+    for (;;) {
+        if (kb0_button_pressed() == 1) {
+            needsUpdate = true;
+            return true;
+        }
+        if (rotary_button_pressed() == 1) {
+            needsUpdate = true;
+            return false;
+        }
+        rotary_encoder_moved(); /* drain encoder */
+        usleep(10000);
+    }
+}
+
+/* Write out what would otherwise be lost when the program goes away */
+static void save_state_before_exit(void) {
+    mkdir("/home/no3z/.scratchtj", 0755);
+    save_variables_to_file(CONFIG_SAVE_PATH);
+
+    for (int i = 0; i < 2; i++) {
+        struct track *tr = deck[i].player.track;
+        if (tr && tr->path)
+            cues_save_to_file(&deck[i].cues, tr->path);
+    }
+}
+
+/* Restart the program in place, so that it reads the beats and samples
+ * folders again (new files copied over FTP, for instance) */
+static void action_restart(void) {
+    if (!confirm_action("Restart?"))
+        return;
+
+    save_state_before_exit();
+
+    oled_clear();
+    oled_draw_confirm("Restarting", "please wait");
+    oled_flush();
+
+    xwax_restart_in_place();
+
+    /* Only reached if the exec failed; carry on as before */
+    show_confirm_screen("Restart failed", "Press any button");
+}
+
+/* Reboot the whole Pi */
+static void action_reboot(void) {
+    if (!confirm_action("Reboot?"))
+        return;
+
+    save_state_before_exit();
+
+    oled_clear();
+    oled_draw_confirm("Rebooting", "please wait");
+    oled_flush();
+
+    sync();
+    if (system("/sbin/reboot") != 0)
+        show_confirm_screen("Reboot failed", "Press any button");
 }
