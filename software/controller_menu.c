@@ -11,7 +11,7 @@
 #include "oled_display.h"
 
 /* Constants */
-#define MAX_MIXER_CONTROLS 20
+#define MAX_MIXER_CONTROLS 32
 
 /* Globals */
 extern bool needsUpdate;
@@ -20,6 +20,7 @@ extern MainMenuState mainMenuState;
 static ControllerMenuOption selectedOption = CONTROLLER_SOUND_SETTINGS;
 static MixerControl mixerControls[MAX_MIXER_CONTROLS];
 static int mixerControlCount = 0;
+static bool mixerChanged = false; /* something was adjusted since the last save */
 
 /* Config save path */
 #define CONFIG_SAVE_PATH "/home/no3z/.scratchtj/config.cfg"
@@ -113,7 +114,7 @@ static void display_mixer_control(MixerControl *control) {
 
 /* Enter Sound Settings Menu */
 void enter_sound_settings_menu(struct deck *d, int deckno) {
-    mixerControlCount = get_mixer_controls("default", mixerControls, MAX_MIXER_CONTROLS);
+    mixerControlCount = get_mixer_controls(MIXER_CARD, mixerControls, MAX_MIXER_CONTROLS);
 
     if (mixerControlCount == 0) {
         printf("No mixer controls found!\n");
@@ -159,6 +160,14 @@ void enter_sound_settings_menu(struct deck *d, int deckno) {
 
         usleep(5000);
     }
+
+    /* Keep the settings: without this they were lost at the next boot,
+     * when the card comes back up with its stored system defaults */
+    if (mixerChanged) {
+        mkdir("/home/no3z/.scratchtj", 0755);
+        if (mixer_save(MIXER_CARD, MIXER_STATE_PATH) == 0)
+            mixerChanged = false;
+    }
 }
 
 /* Adjust a specific Mixer Control */
@@ -182,15 +191,15 @@ static void adjust_mixer_control(int selectedIndex) {
                 control->current += movement;
                 if (control->current < control->min) control->current = control->min;
                 if (control->current > control->max) control->current = control->max;
-                set_mixer_control("default", control->name, control->current);
             } else if (control->isBoolean) {
                 control->current = !control->current;
-                set_mixer_control_boolean("default", control->name, control->current);
             } else if (control->isEnum) {
-                control->currentEnumIndex = (control->currentEnumIndex + movement +
-                                             control->enumItemCount) % control->enumItemCount;
-                set_mixer_control_enum("default", control->name, control->currentEnumIndex);
+                control->currentEnumIndex = ((control->currentEnumIndex + movement) %
+                                             control->enumItemCount + control->enumItemCount) %
+                                            control->enumItemCount;
             }
+            apply_mixer_control(MIXER_CARD, control);
+            mixerChanged = true;
             needsUpdate = true;
         }
 
@@ -200,16 +209,9 @@ static void adjust_mixer_control(int selectedIndex) {
         }
         /* Rotary click = cancel (revert) */
         if (button_press == 1) {
-            if (control->isVolume) {
-                control->current = orig_current;
-                set_mixer_control("default", control->name, control->current);
-            } else if (control->isBoolean) {
-                control->current = orig_current;
-                set_mixer_control_boolean("default", control->name, control->current);
-            } else if (control->isEnum) {
-                control->currentEnumIndex = orig_enumIndex;
-                set_mixer_control_enum("default", control->name, control->currentEnumIndex);
-            }
+            control->current = orig_current;
+            control->currentEnumIndex = orig_enumIndex;
+            apply_mixer_control(MIXER_CARD, control);
             adjusting = false;
         }
 

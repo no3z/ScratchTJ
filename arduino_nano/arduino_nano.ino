@@ -15,10 +15,31 @@ CapacitiveSensor capSensor = CapacitiveSensor(sendPin, sensePin);
 
 bool handshakeCompleted = false;
 
-// Cap sensor is read every CAP_SKIP loops, fader+buttons every loop
-#define CAP_SKIP 5
-unsigned int capValue = 0;  // Cached cap value, updated every CAP_SKIP loops
-int loopCount = 0;
+int faderValue = 0;
+
+// Capacitive touch.
+//
+// The reported value is the sum of the last CAP_WINDOW single-sample
+// measurements: 30 samples, the same scale as one capacitiveSensor(30)
+// reading, so the touch threshold on the Pi is unchanged.
+//
+// One sample is taken every loop instead of thirty at once every fifth
+// loop. Thirty at once blocks for several milliseconds (longer still
+// while the platter is touched), and nothing else is sampled or sent
+// meanwhile: the fader went out in bursts of four packets followed by a
+// hole. One sample costs well under 0.1ms, so the loop - and with it
+// the fader - runs several times faster and on an even clock, and the
+// touch value refreshes every loop too.
+//
+// The speed matters for a second reason: the CH340 USB bridge hands
+// data to the Pi in 32-byte blocks, so the more packets per second we
+// send, the less time each one waits in the bridge for its block to
+// fill.
+#define CAP_WINDOW 30
+
+unsigned int capSample[CAP_WINDOW];  // most recent single-sample readings
+byte capIndex = 0;                   // slot the next reading goes in
+unsigned long capSum = 0;            // running sum of capSample[]
 
 void setup() {
   for (int i = 0; i < NUM_BUTTONS; i++)
@@ -26,6 +47,8 @@ void setup() {
 
   Serial.begin(500000);
   capSensor.set_CS_AutocaL_Millis(0xFFFFFFFF);
+
+  faderValue = analogRead(faderPin);
 }
 
 void loop() {
@@ -37,9 +60,6 @@ void loop() {
     }
   }
 
-  // Read fader every loop (~100us)
-  int faderValue = analogRead(faderPin);
-
   // Read buttons every loop (~20us)
   byte buttons = 0;
   for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -47,14 +67,10 @@ void loop() {
       buttons |= (1 << i);
   }
 
-  // Read cap sensor only every CAP_SKIP loops (~3ms every 5th loop)
-  if (++loopCount >= CAP_SKIP) {
-    loopCount = 0;
-    long rawCap = capSensor.capacitiveSensor(30);
-    capValue = (rawCap > 65535) ? 65535 : (rawCap < 0 ? 0 : (unsigned int)rawCap);
-  }
+  unsigned int capValue = (capSum > 65535UL) ? 65535U : (unsigned int)capSum;
 
-  // Send packet every loop -- fader is always fresh, cap may be cached
+  // faderValue was read during the previous packet's transmission, so
+  // it is only a fraction of a millisecond old
   byte packet[7];
   packet[0] = SYNC_BYTE;
   packet[1] = (faderValue >> 8) & 0xFF;
@@ -65,4 +81,25 @@ void loop() {
   packet[6] = packet[1] ^ packet[2] ^ packet[3] ^ packet[4] ^ packet[5];
 
   Serial.write(packet, 7);
+
+  // Convert the fader for the next packet while this one goes out
+  // (the conversion takes ~110us, the packet 140us on the wire)
+  faderValue = analogRead(faderPin);
+
+  // Let the packet finish before measuring touch, so the transmit
+  // interrupt cannot fire in the middle of the measurement and disturb
+  // the count. It also leaves a pause on the wire between packets,
+  // which the CH340 bridge needs: fed several packets back to back at
+  // 500k baud it dropped the tail of about 5% of them.
+  Serial.flush();
+
+  // One touch sample, replacing the oldest in the running sum
+  long raw = capSensor.capacitiveSensor(1);
+  unsigned int sample = (raw > 65535L) ? 65535U : (raw < 0 ? 0 : (unsigned int)raw);
+
+  capSum -= capSample[capIndex];
+  capSample[capIndex] = sample;
+  capSum += sample;
+  if (++capIndex >= CAP_WINDOW)
+    capIndex = 0;
 }

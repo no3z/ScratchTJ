@@ -15,7 +15,7 @@ extern volatile uint8_t settings_buttons_held;  /* bitmask of held cue buttons i
 extern volatile int active_deck;                /* 0 or 1: which deck platter controls */
 
 void SC_Input_Start();
-void process_rot();
+void process_rot(int raw, double when);
 void process_cue_buttons(uint8_t button_byte);
 
 /* Cue display states (for TFT cue bar) */

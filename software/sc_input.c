@@ -11,7 +11,10 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <linux/i2c.h>
 #include <linux/i2c-dev.h>
+#include <pthread.h>
+#include <sched.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <time.h>
@@ -35,6 +38,7 @@
 #include <sys/ioctl.h>
 #include "shared_variables.h"
 #include "oled_display.h"
+#include "platter.h"
 
 /* ── Serial protocol constants ─────────────────────────────────── */
 #define SERIAL_DEV    "/dev/ttyUSB0"
@@ -54,6 +58,17 @@ static int pkt_len = PKTLEN_V2;  /* Use 7-byte parsing (works with both firmware
 
 /* ── Encoder constants (14-bit) ────────────────────────────────── */
 #define ENCODER_CPR      16384
+
+/* ── Input loop timing ─────────────────────────────────────────── */
+/* SCHED_FIFO priority of the input thread; the audio thread runs at 80 */
+#define INPUT_RT_PRIORITY 60
+/* Never poll faster than this. On a 100kHz bus one encoder read takes
+ * longer than this anyway; on a 400kHz bus it gives a steady 2kHz. */
+#define INPUT_MIN_PERIOD_NS 500000L
+
+#ifndef SCHED_RESET_ON_FORK
+#define SCHED_RESET_ON_FORK 0x40000000
+#endif
 
 /* ── Globals ───────────────────────────────────────────────────── */
 int serial_fd;
@@ -147,13 +162,35 @@ static int mt6701_init(void) {
     return 0;
 }
 
-/* Read 14-bit angle (0-16383) from MT6701. Returns -1 on error. */
-static int mt6701_read_angle(void) {
+static double monotonic_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Read 14-bit angle (0-16383) from MT6701. Returns -1 on error.
+ *
+ * Register pointer write and two-byte read go out as a single combined
+ * transaction (repeated start): one syscall instead of two, and nothing
+ * else on the bus can get in between the two halves.
+ *
+ * *when is set to the time the angle was valid: the sensor latches it
+ * during the transfer, so the midpoint is the best estimate. */
+static int mt6701_read_angle(double *when) {
     if (i2c_mt6701_fd < 0) return -1;
+
     uint8_t reg = MT6701_ANGLE_H;
-    if (write(i2c_mt6701_fd, &reg, 1) != 1) return -1;
     uint8_t buf[2];
-    if (read(i2c_mt6701_fd, buf, 2) != 2) return -1;
+    struct i2c_msg msgs[2] = {
+        { .addr = MT6701_ADDR, .flags = 0,        .len = 1, .buf = &reg },
+        { .addr = MT6701_ADDR, .flags = I2C_M_RD, .len = 2, .buf = buf  },
+    };
+    struct i2c_rdwr_ioctl_data xfer = { .msgs = msgs, .nmsgs = 2 };
+
+    double t0 = monotonic_now();
+    if (ioctl(i2c_mt6701_fd, I2C_RDWR, &xfer) < 0) return -1;
+    *when = (t0 + monotonic_now()) * 0.5;
+
     /* 14-bit angle: reg03[7:0] = bits 13..6, reg04[7:2] = bits 5..0 */
     return ((uint16_t)buf[0] << 6) | (buf[1] >> 2);
 }
@@ -646,14 +683,6 @@ static void read_serial_data(void) {
     }
 }
 
-/* ── Read MT6701 angle and set deck encoder ────────────────────── */
-static void read_mt6701_angle(void) {
-    int angle = mt6701_read_angle();
-    if (angle >= 0) {
-        deck[active_deck].newEncoderAngle = angle;
-    }
-}
-
 void process_pic()
 {
     if (ADCs[0] < 0) ADCs[0] = 0;
@@ -758,128 +787,223 @@ static void settings_adjust_parameter(int btn, int delta) {
     }
 }
 
-// Keep a running average of speed so if we suddenly let go it keeps going at that speed
-double averageSpeed = 0.0;
-unsigned int numBlips = 0;
-void process_rot()
+/* ── Platter ───────────────────────────────────────────────────── */
+
+/* One physical platter, shared by whichever deck is active */
+static struct platter_tracker platter;
+static int platter_deck = -1;   /* deck the platter was driving last time */
+static unsigned int numBlips = 0;
+
+/* ── Touch by motion ───────────────────────────────────────────── */
+/* With motion_touch on, a platter that is being turned counts as
+ * touched, so the instrument is playable when the capacitive sensor is
+ * missing or unreliable. The platter has no motor: it only moves when a
+ * hand moves it.
+ *
+ * What it cannot do is tell a hand holding the platter still from no
+ * hand at all, so a held record resumes playing after MOTION_HOLD. */
+
+/* Counts the platter must travel from rest before it is taken as a hand
+ * (about 0.25 degrees): enough to ignore sensor jitter and knocks */
+#define MOTION_START_COUNTS 12
+/* Counts of travel that keep an existing touch alive. Above the few
+ * counts of jitter the sensor shows at some angles, or a platter at
+ * rest would never be released. */
+#define MOTION_KEEP_COUNTS 6
+/* How long the platter may sit still before the touch is released.
+ * Must outlast the instant of standstill as a scratch reverses. */
+#define MOTION_HOLD 0.12
+/* While untouched, re-take the rest position this often, so that slow
+ * creep never adds up to a false touch */
+#define MOTION_REANCHOR 0.25
+
+static bool motionTouched = false;
+static int64_t motion_anchor;       /* platter count the travel is measured from */
+static double motion_time;          /* when the platter last moved (or was anchored) */
+
+static void motion_touch_reset(double when)
+{
+	motionTouched = false;
+	motion_anchor = platter.count;
+	motion_time = when;
+}
+
+/* Update motionTouched from the platter position at time when */
+static void motion_touch_update(double when)
+{
+	int64_t travel = platter.count - motion_anchor;
+
+	if (travel < 0)
+		travel = -travel;
+
+	if (motionTouched)
+	{
+		if (travel >= MOTION_KEEP_COUNTS)
+		{
+			motion_anchor = platter.count;
+			motion_time = when;
+		}
+		else if (when - motion_time > MOTION_HOLD)
+		{
+			motion_touch_reset(when);
+		}
+	}
+	else if (travel >= MOTION_START_COUNTS)
+	{
+		motionTouched = true;
+		motion_anchor = platter.count;
+		motion_time = when;
+	}
+	else if (when - motion_time > MOTION_REANCHOR)
+	{
+		motion_touch_reset(when);
+	}
+}
+
+/* Hand the current platter state to the audio thread */
+static void publish_platter(struct deck *d, double when, float platterspeed)
+{
+	d->player.platter_velocity = platter.velocity / platterspeed;
+	d->player.platter_time = when;
+	d->player.target_position = (double)(d->encoderAngle + d->angleOffset) / platterspeed;
+}
+
+/* Process one encoder reading: raw is the 14-bit angle, when is the
+ * monotonic time at which it was sampled */
+void process_rot(int raw, double when)
 {
 	int ad = active_deck;
-	int8_t crossedZero;
-	int wrappedAngle = 0x0000;
+	struct deck *d = &deck[ad];
+	float platterspeed, blipthreshold;
+	int delta;
 
-	if (scsettings.jogReverse) {
-		deck[ad].newEncoderAngle = (ENCODER_CPR - 1) - deck[ad].newEncoderAngle;
+	get_variable_value("platterspeed", &platterspeed);
+	get_variable_value("blipthreshold", &blipthreshold);
+
+	if (scsettings.jogReverse)
+		raw = (ENCODER_CPR - 1) - raw;
+
+	d->newEncoderAngle = raw;
+
+	/* The platter has been handed to the other deck: let go of the old
+	 * one so it carries on under its motor instead of freezing on a
+	 * target that will never move again, and start the new one from
+	 * where the platter is now */
+	if (ad != platter_deck)
+	{
+		if (platter_deck >= 0)
+			deck[platter_deck].player.capTouch = 0;
+		d->player.capTouch = 0;
+		d->encoderAngle = 0xffff;
+		platter_deck = ad;
 	}
 
 	// First time, make sure there's no difference
-	if (deck[ad].encoderAngle == 0xffff)
-		deck[ad].encoderAngle = deck[ad].newEncoderAngle;
-
-	// Handle wrapping at zero (14-bit: quarter = CPR/4)
-	if (deck[ad].newEncoderAngle < (ENCODER_CPR / 4) && deck[ad].encoderAngle >= (ENCODER_CPR * 3 / 4))
+	if (d->encoderAngle == 0xffff || platter.last_raw < 0)
 	{
-		crossedZero = 1;
-		wrappedAngle = deck[ad].encoderAngle - ENCODER_CPR;
-	}
-	else if (deck[ad].newEncoderAngle >= (ENCODER_CPR * 3 / 4) && deck[ad].encoderAngle < (ENCODER_CPR / 4))
-	{
-		crossedZero = -1;
-		wrappedAngle = deck[ad].encoderAngle + ENCODER_CPR;
-	}
-	else
-	{
-		crossedZero = 0;
-		wrappedAngle = deck[ad].encoderAngle;
+		platter_tracker_reset(&platter);
+		platter_tracker_update(&platter, raw, when);
+		d->encoderAngle = raw;
+		d->angleOffset = (d->player.position * platterspeed) - raw;
+		numBlips = 0;
+		motion_touch_reset(when);
+		return;
 	}
 
-	// Blip threshold (configurable, needs 4x increase for 14-bit vs 12-bit)
-	float blipthreshold;
-	get_variable_value("blipthreshold", &blipthreshold);
-	if (abs(deck[ad].newEncoderAngle - wrappedAngle) > (int)blipthreshold && numBlips < 2)
+	/* A bad read shows up as an impossible jump. Ignore up to two in a
+	 * row; a third means the platter really is there, so accept it */
+	delta = platter_tracker_delta(&platter, raw);
+	if (abs(delta) > (int)blipthreshold && numBlips < 2)
 	{
 		numBlips++;
+		return;
+	}
+	numBlips = 0;
+
+	delta = platter_tracker_update(&platter, raw, when);
+
+	/* encoderAngle stays a raw 0..CPR-1 angle (the display needs that);
+	 * whole turns are carried in angleOffset, so that
+	 * encoderAngle + angleOffset is the unwrapped position */
+	d->angleOffset += delta - (raw - d->encoderAngle);
+	d->encoderAngle = raw;
+
+	float motion_touch = 0.0f;
+	get_variable_value("motion_touch", &motion_touch);
+	if (motion_touch >= 0.5f)
+		motion_touch_update(when);
+	else
+		motion_touch_reset(when);
+
+	/* SETTINGS mode: divert platter to parameter adjustment */
+	if (settings_buttons_held != 0) {
+		for (int i = 0; i < 4; i++) {
+			if (settings_buttons_held & (1 << i))
+				settings_adjust_parameter(i, delta);
+		}
+		/* Release capTouch so player uses motor/slipmat path,
+		 * not position-tracking (which would freeze pitch to 0) */
+		d->player.capTouch = 0;
+		motion_touch_reset(when);
+		/* Resync offset for when user releases button and resumes scratching */
+		get_variable_value("platterspeed", &platterspeed);
+		d->angleOffset = (d->player.position * platterspeed) - d->encoderAngle;
+		return;
+	}
+
+	if (pitchMode)
+	{
+		if (!oldPitchMode)
+		{
+			deck[(pitchMode - 1)].player.note_pitch = 1.0;
+			d->angleOffset = -d->encoderAngle;
+			oldPitchMode = 1;
+			d->player.capTouch = 0;
+		}
+
+		deck[(pitchMode - 1)].player.note_pitch = (((double)(d->encoderAngle + d->angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
 	}
 	else
 	{
-		numBlips = 0;
-		deck[ad].encoderAngle = deck[ad].newEncoderAngle;
-
-		/* SETTINGS mode: divert platter to parameter adjustment */
-		if (settings_buttons_held != 0) {
-			int delta = deck[ad].newEncoderAngle - wrappedAngle;
-			for (int i = 0; i < 4; i++) {
-				if (settings_buttons_held & (1 << i))
-					settings_adjust_parameter(i, delta);
-			}
-			/* Release capTouch so player uses motor/slipmat path,
-			 * not position-tracking (which would freeze pitch to 0) */
-			deck[ad].player.capTouch = 0;
-			/* Resync offset for when user releases button and resumes scratching */
-			float ps;
-			get_variable_value("platterspeed", &ps);
-			deck[ad].angleOffset = (deck[ad].player.position * ps) - deck[ad].encoderAngle;
-			return;
-		}
-
-		if (pitchMode)
+		if (scsettings.platterenabled)
 		{
-			if (!oldPitchMode)
+			if (capIsTouched || motionTouched || d->player.motor_speed == 0.0)
 			{
-				deck[(pitchMode - 1)].player.note_pitch = 1.0;
-				deck[ad].angleOffset = -deck[ad].encoderAngle;
-				oldPitchMode = 1;
-				deck[ad].player.capTouch = 0;
-			}
-
-			if (crossedZero > 0)
-			{
-				deck[ad].angleOffset += ENCODER_CPR;
-			}
-			else if (crossedZero < 0)
-			{
-				deck[ad].angleOffset -= ENCODER_CPR;
-			}
-
-			deck[(pitchMode - 1)].player.note_pitch = (((double)(deck[ad].encoderAngle + deck[ad].angleOffset)) / (ENCODER_CPR * 4)) + 1.0;
-		}
-		else
-		{
-			if (scsettings.platterenabled)
-			{
-				if (capIsTouched || deck[ad].player.motor_speed == 0.0)
+				if (!d->player.capTouch || (oldPitchMode && !d->player.stopped))
 				{
-					if (!deck[ad].player.capTouch || oldPitchMode && !deck[ad].player.stopped)
-					{
-						float platterspeed;
-						get_variable_value("platterspeed", &platterspeed);
-						deck[ad].angleOffset = (deck[ad].player.position * platterspeed) - deck[ad].encoderAngle;
-						deck[ad].player.target_position = deck[ad].player.position;
-						deck[ad].player.capTouch = 1;
-					}
-				}
-				else
-				{
-					deck[ad].player.capTouch = 0;
+					/* Just grabbed: the platter's current angle becomes
+					 * the current track position */
+					d->angleOffset = (d->player.position * platterspeed) - d->encoderAngle;
+					publish_platter(d, when, platterspeed);
+					d->player.capTouch = 1;
 				}
 			}
 			else
-				deck[ad].player.capTouch = 1;
-
-			if (crossedZero > 0)
 			{
-				deck[ad].angleOffset += ENCODER_CPR;
+				d->player.capTouch = 0;
 			}
-			else if (crossedZero < 0)
-			{
-				deck[ad].angleOffset -= ENCODER_CPR;
-			}
-
-				float platterspeed;
-			get_variable_value("platterspeed", &platterspeed);
-			deck[ad].player.target_position = (double)(deck[ad].encoderAngle + deck[ad].angleOffset) / platterspeed;
 		}
-		oldPitchMode = pitchMode;
+		else
+			d->player.capTouch = 1;
+
+		publish_platter(d, when, platterspeed);
 	}
+	oldPitchMode = pitchMode;
+}
+
+/* Run the calling thread under realtime scheduling, below the audio
+ * thread. Without this an ordinary process (the display redraw, a
+ * track import) can hold up encoder reads for many milliseconds. */
+static void input_thread_realtime(void)
+{
+	struct sched_param sp = { .sched_priority = INPUT_RT_PRIORITY };
+
+	/* On Linux pid 0 means the calling thread. RESET_ON_FORK keeps the
+	 * track importer processes we spawn from inheriting the priority. */
+	if (sched_setscheduler(0, SCHED_FIFO | SCHED_RESET_ON_FORK, &sp) != 0)
+		perror("Input thread: no realtime priority (run as root for best platter response)");
+	else
+		printf("Input thread: realtime priority %d\n", INPUT_RT_PRIORITY);
 }
 
 void *SC_InputThread(void *ptr)
@@ -898,6 +1022,12 @@ void *SC_InputThread(void *ptr)
 	if (mt6701_init() < 0) {
 		printf("Warning: MT6701 not available, platter disabled\n");
 	}
+	platter_tracker_init(&platter, ENCODER_CPR);
+
+	input_thread_realtime();
+
+	struct timespec next_wake;
+	clock_gettime(CLOCK_MONOTONIC, &next_wake);
 
 	srand(time(NULL));
 
@@ -948,13 +1078,17 @@ void *SC_InputThread(void *ptr)
 		/* Read fader + cap + buttons from serial */
 		read_serial_data();
 
-		/* Read MT6701 angle (replaces Arduino encoder) */
-		read_mt6701_angle();
-
 		picpresent = 1;
 
-process_pic();
-			process_rot();
+		process_pic();
+
+		/* Read MT6701 angle. A failed read is simply skipped: the
+		 * platter tracker copes with gaps, and inventing a value
+		 * would be heard as a jump. */
+		double when;
+		int angle = mt6701_read_angle(&when);
+		if (angle >= 0)
+			process_rot(angle, when);
 		if (picpresent)
 		{
 			picskip++;
@@ -986,8 +1120,23 @@ process_pic();
 			lastinputtime = inputtime;
 		}
 
-		/* No sleep -- loop as fast as I2C allows (~2-5kHz),
-		 * matching SC1000 behavior for tight scratch response */
+		/* Pace the loop. Sleeping to an absolute deadline keeps the
+		 * samples evenly spaced; if the iteration already took longer
+		 * (slow I2C bus) there is no sleep at all. This also stops a
+		 * realtime thread from spinning flat out when the sensor is
+		 * missing and reads fail instantly. */
+		next_wake.tv_nsec += INPUT_MIN_PERIOD_NS;
+		if (next_wake.tv_nsec >= 1000000000L) {
+			next_wake.tv_nsec -= 1000000000L;
+			next_wake.tv_sec++;
+		}
+		struct timespec now_ts;
+		clock_gettime(CLOCK_MONOTONIC, &now_ts);
+		if (now_ts.tv_sec > next_wake.tv_sec ||
+			(now_ts.tv_sec == next_wake.tv_sec && now_ts.tv_nsec >= next_wake.tv_nsec))
+			next_wake = now_ts;
+		else
+			clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_wake, NULL);
 	}
 }
 

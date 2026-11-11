@@ -69,6 +69,14 @@ struct player {
     bool timecode_control,
         recalibrate; /* re-sync offset at next opportunity */
 	bool justPlay;
+
+    /* Platter motion, written by the input thread alongside target_position */
+    double platter_velocity; /* platter speed as a pitch (1.0 = normal play) */
+    double platter_time; /* CLOCK_MONOTONIC seconds when target_position was sampled */
+
+    /* Position-error correction term of the platter tracking loop */
+    double track_corr;
+    bool tracking; /* the previous block was platter-controlled */
 	double faderTarget; // Player should slowly fade to this level
 	double faderVolume; // current fader volume
     double setVolume; // volume set by the volume controls on the back of the sc1000 or the volume buttons on the sc500 (or whatever over midi)

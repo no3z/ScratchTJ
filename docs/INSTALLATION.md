@@ -61,6 +61,16 @@ amixer -c 0 sset 'Output Mixer HiFi' on
 amixer -c 0 sset 'Line' 31
 ```
 
+### FTP access to beats and samples (optional)
+
+To manage the `beats` and `samples` folders over the network, run once on the Pi:
+
+```bash
+bash ~/ScratchTJ/docs/setup_ftp.sh
+```
+
+This installs `vsftpd`, limited to the user `no3z` (log in with the Pi password) and to those two folders. The address is shown on the device under **Info > Network / FTP**. FTP is unencrypted: use it on your own network only. New files are picked up the next time xwax starts.
+
 ---
 
 ## 2. Arduino Nano Firmware
@@ -227,6 +237,8 @@ Edit `scsettings.txt` in the software directory, or use the on-device Controller
 | `Fad Factor` | 0.1 | 0.01 - 10 | Fader curve transition point |
 | `Fad Power` | 0.2 | 0.01 - 10 | Fader curve exponent |
 | `fader_sharp` | 1.0 | 0 - 1.0 | Fader sharpness |
+| `vel_ff` | 1.0 | 0 - 1.0 | Platter velocity feed-forward (1 = locked to the hand, 0 = original SC1000 tracking) |
+| `motion_touch` | 0 | 0 - 1 | 1 = a moving platter counts as touched (play without the capacitive touch sensor) |
 | `platterenabled` | 1 | 0 - 1 | Enable/disable platter |
 
 ### Presets

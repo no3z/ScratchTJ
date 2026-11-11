@@ -201,6 +201,8 @@ All adjustable live from Config > Global Settings:
 | blipthreshold | 400 | 50 - 2048 | 50 | Encoder glitch rejection threshold |
 | pitch_filter | 0.1 | 0.01 - 1.0 | 0.01 | Pitch low-pass filter (0=smooth, 1=instant) |
 | fader_sharp | 1.0 | 0 - 1.0 | 0.05 | Fader sharpness |
+| vel_ff | 1.0 | 0 - 1.0 | 0.1 | Platter velocity feed-forward: 1 = audio locked to the hand, 0 = original SC1000 tracking (then governed by target_pitch / pitch_filter) |
+| motion_touch | 0 | 0 - 1 | 1 | 1 = a moving platter counts as touched, to play without a working capacitive touch sensor (a platter held still is released after 0.12 s) |
 | fhist_secs | 2.0 | 0.1 - 120 | 0.1 | Fader history graph time window (seconds) |
 
 ### Serial Protocol

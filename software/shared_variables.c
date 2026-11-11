@@ -30,9 +30,10 @@ void register_variable(const char *name, float *valuePtr, float minValue, float 
 bool get_variable_value(const char *name, float *outValue) {
     for (int i = 0; i < variableCount; i++) {
         if (variables[i].name && strcmp(variables[i].name, name) == 0) {
-            pthread_mutex_lock(&variables[i].mutex);
+            /* No lock: a float load is atomic, and this is called from
+             * the realtime audio thread, which must never block on a
+             * mutex held by a low-priority menu thread */
             *outValue = *(variables[i].valuePtr);
-            pthread_mutex_unlock(&variables[i].mutex);
             return true;
         }
     }

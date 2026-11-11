@@ -25,6 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "device.h"
 #include "player.h"
@@ -64,6 +65,38 @@ static inline double soft_clip(double v) {
 
 #define SQ(x) ((x) * (x))
 #define TARGET_UNKNOWN INFINITY
+
+/* Platter tracking.
+ *
+ * The input thread timestamps every encoder sample and estimates the
+ * platter velocity. If the newest sample is older than PLATTER_STALE the
+ * velocity is not trusted (sensor or thread stalled) and we fall back to
+ * pure position tracking. The target is extrapolated to "now" by at most
+ * MAX_EXTRAPOLATE so a late sample cannot throw the position far off. */
+
+#define PLATTER_STALE 0.020
+#define MAX_EXTRAPOLATE 0.004
+
+/* A hand cannot spin the platter anywhere near this fast; anything
+ * beyond it is a glitch and must not reach the resampler */
+#define MAX_TRACK_PITCH 40.0
+
+/* Position-loop gain and smoothing used when velocity feed-forward is
+ * fully on. With the velocity doing the real work the loop only has to
+ * remove small residual errors, so it can be much stiffer than the
+ * SC1000 values without sounding rough: roughly 7ms smoothing, close to
+ * critically damped at the usual 128-sample period. */
+
+#define TRACK_GAIN 60.0
+#define TRACK_ALPHA 0.4
+
+static double monotonic_now(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
 
 /*
  * Return: the cubic interpolation of the sample at position 2 + mu
@@ -263,6 +296,10 @@ void player_init(struct player *pl, unsigned int sample_rate,
 	pl->fader_pitch = 1.0;
 	pl->bend_pitch = 1.0;
 	pl->stopped = 0;
+	pl->platter_velocity = 0.0;
+	pl->platter_time = 0.0;
+	pl->track_corr = 0.0;
+	pl->tracking = false;
 	pl->recording = false;
 	pl->recordingStarted = false;
 	pl->beepPos = 0;
@@ -513,29 +550,71 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 			target_pitch = pl->pitch - (double)samples / slippiness;
 		else
 			target_pitch = pl->motor_speed;
+
+		// Pitch low-pass filter: matches SC1000 exactly (0.1/0.9 IIR)
+		float pitch_alpha;
+		get_variable_value("pitch_filter", &pitch_alpha);
+		filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
+
+		pl->tracking = false;
 	}
 	else
 	{
-		diff = pl->position - pl->target_position;
-		float target_pitch_multiplier;
+		/* Platter is under the hand: follow it.
+		 *
+		 * SC1000 derives pitch purely from position error:
+		 *     pitch = lowpass(-diff * gain)
+		 * which needs an error to exist before it reacts, so the audio
+		 * trails the hand by tens of milliseconds and smears fast moves.
+		 *
+		 * Here the measured platter velocity drives pitch directly
+		 * (feed-forward), and the SC1000 position loop only trims the
+		 * small error that remains. vel_ff = 0 gives the original
+		 * SC1000 behaviour exactly, governed by target_pitch and
+		 * pitch_filter. */
 
-		// Original Buffer Size (B_{\text{original}}): 256
-		// New Buffer Size (B_{\text{new}}): 1024
-// Scaling Factor:
+		float user_gain, user_alpha, vel_ff;
+		double gain, pitch_alpha, vel = 0.0, age, corr_target;
 
-// Scaling Factor=𝐵original/𝐵new=256/1024=0.25
-// Scaling Factor=40×0.25=10
+		get_variable_value("target_pitch", &user_gain);
+		get_variable_value("pitch_filter", &user_alpha);
+		if (!get_variable_value("vel_ff", &vel_ff))
+			vel_ff = 0.0f;
 
-		get_variable_value("target_pitch", &target_pitch_multiplier);
+		/* target_pitch and pitch_filter are the SC1000 loop settings;
+		 * they fade out as feed-forward takes over */
+		gain = user_gain + vel_ff * (TRACK_GAIN - user_gain);
+		pitch_alpha = user_alpha + vel_ff * (TRACK_ALPHA - user_alpha);
 
-		target_pitch = (-diff) * target_pitch_multiplier;
+		age = monotonic_now() - pl->platter_time;
+		if (vel_ff > 0.0f && age >= 0.0 && age < PLATTER_STALE)
+			vel = pl->platter_velocity * vel_ff;
+		if (age > MAX_EXTRAPOLATE)
+			age = MAX_EXTRAPOLATE;
+
+		/* Where the platter is now, not where it was when last sampled */
+		diff = pl->position - (pl->target_position + vel * age);
+
+		/* On grabbing the platter, start the correction term such that
+		 * pitch carries on from its current value without a step */
+		if (!pl->tracking)
+			pl->track_corr = pl->pitch - vel;
+
+		corr_target = (-diff) * gain;
+		pl->track_corr = (pitch_alpha * corr_target) + ((1.0 - pitch_alpha) * pl->track_corr);
+
+		filtered_pitch = vel + pl->track_corr;
+
+		if (!isfinite(filtered_pitch))
+			filtered_pitch = 0.0;
+		else if (filtered_pitch > MAX_TRACK_PITCH)
+			filtered_pitch = MAX_TRACK_PITCH;
+		else if (filtered_pitch < -MAX_TRACK_PITCH)
+			filtered_pitch = -MAX_TRACK_PITCH;
+
+		pl->tracking = true;
 	}
 	pl->oldCapTouch = pl->capTouch;
-
-	// Pitch low-pass filter: matches SC1000 exactly (0.1/0.9 IIR)
-	float pitch_alpha;
-	get_variable_value("pitch_filter", &pitch_alpha);
-	filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
 	// Fader volume ramp: fader_sharp=1.0 = instant, 0.0 = 20ms SC1000 style
 	float fader_sharpness;

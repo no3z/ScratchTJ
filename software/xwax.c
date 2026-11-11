@@ -48,6 +48,7 @@
 #include "sc_midimap.h"
 #include "dicer.h"
 #include "lcd_menu.h"
+#include "alsa_mixer.h"
 #include "shared_variables.h"
 
 #define DEFAULT_IMPORTER EXECDIR "/xwax-import"
@@ -73,6 +74,8 @@ float target_pitch = 40.0f;
 float blipthreshold = 400.0f;
 float pitch_filter = 0.1f;
 float fader_sharpness = 1.0f;
+float vel_ff = 1.0f;
+float motion_touch = 0.0f;
 float fhist_secs = 2.0f;
 
 unsigned int countChars(char *string, char c)
@@ -382,6 +385,12 @@ int main(int argc, char *argv[])
 	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
 	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
 	register_variable("fader_sharp", &fader_sharpness, 0.0f, 1.0f, 0.05f);
+	/* Platter velocity feed-forward: 1 = audio locked to the hand,
+	 * 0 = original SC1000 position-only tracking */
+	register_variable("vel_ff", &vel_ff, 0.0f, 1.0f, 0.1f);
+	/* 1 = a moving platter counts as touched, for playing without a
+	 * working capacitive touch sensor */
+	register_variable("motion_touch", &motion_touch, 0.0f, 1.0f, 1.0f);
 	register_variable("fhist_secs", &fhist_secs, 0.1f, 120.0f, 0.1f);
 
 	/* Sync scsettings.platterspeed (from config file) → float variable */
@@ -403,6 +412,9 @@ int main(int argc, char *argv[])
 		deck[1].player.position = -4.0;
 	}
 	
+	/* Bring back the sound card settings made in the Sound Settings menu */
+	mixer_restore(MIXER_CARD, MIXER_STATE_PATH);
+
 	SC_Input_Start();
 
 	// Start input processing thread
@@ -411,7 +423,10 @@ int main(int argc, char *argv[])
 
 	// Start realtime stuff
 
-	priority = 0;
+	/* Audio runs under SCHED_FIFO so nothing else on the Pi (display,
+	 * track import, system daemons) can delay it. Falls back to normal
+	 * scheduling if we are not allowed (not root). */
+	priority = 80;
 
 	if (rt_start(&rt, priority) == -1)
 		return -1;

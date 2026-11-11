@@ -183,6 +183,12 @@ int start_recording(RecordingContext *context, const char *input_device, const c
         return -1;
     }
 
+    /* A deep capture buffer (~340ms). Recording is not latency
+     * sensitive, and the default tiny buffer overruns - dropping audio -
+     * whenever writing the file to the SD card stalls for a moment. */
+    snd_pcm_uframes_t capture_buffer = 16384;
+    snd_pcm_hw_params_set_buffer_size_near(context->capture_handle, hw_params, &capture_buffer);
+
     // Write the parameters to the driver.
     if ((err = snd_pcm_hw_params(context->capture_handle, hw_params)) < 0)
     {

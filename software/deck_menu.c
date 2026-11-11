@@ -421,7 +421,7 @@ void action_prev_folder(struct deck *d, int deckno) {
 
 static void load_mixer_for_source(void) {
     MixerControl all_controls[20];
-    int total = get_mixer_controls("default", all_controls, 20);
+    int total = get_mixer_controls(MIXER_CARD, all_controls, 20);
     for (int c = 0; c < REC_SETUP_NUM_CONTROLS; c++) {
         rec_mixer[c].isVolume = false;
         rec_mixer[c].isBoolean = false;

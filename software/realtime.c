@@ -35,6 +35,10 @@
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
 
+#ifndef SCHED_RESET_ON_FORK
+#define SCHED_RESET_ON_FORK 0x40000000
+#endif
+
         int file_i2c;
        unsigned char buf[60] = {0};
 
@@ -63,7 +67,8 @@ static int raise_priority(int priority)
 
     sp.sched_priority = priority;
 
-    if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+    /* RESET_ON_FORK: child processes must not inherit realtime priority */
+    if (sched_setscheduler(0, SCHED_FIFO | SCHED_RESET_ON_FORK, &sp)) {
         perror("sched_setscheduler");
         fprintf(stderr, "Failed to get realtime priorities\n");
         return -1;
@@ -87,7 +92,11 @@ static void rt_main(struct rt *rt)
 
     if (rt->priority != 0) {
         if (raise_priority(rt->priority) == -1)
-            rt->finished = true;
+            fprintf(stderr, "Continuing without realtime priority; "
+                    "expect audio glitches under load\n");
+        else
+            fprintf(stderr, "Audio thread: realtime priority %d\n",
+                    rt->priority);
     }
 
     if (sem_post(&rt->sem) == -1)

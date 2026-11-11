@@ -54,6 +54,7 @@ OBJS = controller.o \
 	device.o \
 	dummy.o \
 	external.o \
+	platter.o \
 	player.o \
 	realtime.o \
 	rig.o \
