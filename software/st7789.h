@@ -44,4 +44,8 @@ void st7789_draw_string(int x, int y, const char *str, uint16_t color, int scale
 int  st7789_string_width(const char *str, int scale);
 void st7789_flush(void);
 
+/* Panel sleep, for the screen saver: 1 = display off and sleep,
+ * 0 = wake. The framebuffer is kept; flush after waking to show it. */
+void st7789_sleep(int sleep);
+
 #endif

@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +33,7 @@
 #include "track.h"
 #include "xwax.h"
 #include "shared_variables.h"
+#include "settings.h"
 
 /* Bend playback speed to compensate for the difference between our
  * current position and that given by the timecode */
@@ -60,8 +62,6 @@ static inline double soft_clip(double v) {
 }
 
 // Time in seconds fader takes to decay (matches SC1000)
-#define FADERDECAY 0.020
-#define DECAYSAMPLES FADERDECAY * 48000
 
 #define SQ(x) ((x) * (x))
 #define TARGET_UNKNOWN INFINITY
@@ -151,7 +151,7 @@ static double dither(void)
 
 static double build_pcm(signed short *pcm, unsigned samples, double sample_dt,
 						struct track *tr, double position, double pitch, double end_pitch, double start_vol,
-						double end_vol)
+						double end_vol, bool soft)
 {
 	int s;
 	double sample, step, vol, gradient, pitchGradient;
@@ -214,10 +214,18 @@ static double build_pcm(signed short *pcm, unsigned samples, double sample_dt,
 
 			v = vol * cubic_interpolate(i[c], f) + dither();
 
-			/* Soft saturation: smooth tanh curve instead of hard clipping.
-			 * Allows volumes > 1.0 to add warm harmonic distortion rather
-			 * than fizzy digital clipping. */
-			*pcm++ = (signed short)soft_clip(v);
+			/* Soft clip setting: smooth tanh curve instead of hard
+			 * clipping, so volumes > 1.0 add warm harmonic distortion
+			 * rather than fizzy digital clipping. Off is the SC1000's
+			 * plain hard clip. */
+			if (soft)
+				*pcm++ = (signed short)soft_clip(v);
+			else if (v > SHRT_MAX)
+				*pcm++ = SHRT_MAX;
+			else if (v < SHRT_MIN)
+				*pcm++ = SHRT_MIN;
+			else
+				*pcm++ = (signed short)v;
 		}
 
 		sample += step;
@@ -384,6 +392,18 @@ void player_recue(struct player *pl)
  * Post: caller does not hold reference on track
  */
 
+static pthread_mutex_t track_read_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void player_track_read_lock(void)
+{
+	pthread_mutex_lock(&track_read_lock);
+}
+
+void player_track_read_unlock(void)
+{
+	pthread_mutex_unlock(&track_read_lock);
+}
+
 void player_set_track(struct player *pl, struct track *track)
 {
 	struct track *x;
@@ -393,7 +413,9 @@ void player_set_track(struct player *pl, struct track *track)
 	x = pl->track;
 	pl->track = track;
 	spin_unlock(&pl->lock);
+	pthread_mutex_lock(&track_read_lock); /* wait out any display read */
 	track_release(x); /* discard the old track */
+	pthread_mutex_unlock(&track_read_lock);
 }
 
 /*
@@ -417,7 +439,9 @@ void player_clone(struct player *pl, const struct player *from)
 	pl->track = t;
 	spin_unlock(&pl->lock);
 
+	pthread_mutex_lock(&track_read_lock);
 	track_release(x);
+	pthread_mutex_unlock(&track_read_lock);
 }
 
 /*
@@ -504,7 +528,7 @@ bool NearlyEqual(double val1, double val2, double tolerance)
 
 void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 {
-	double r, pitch=0.0, target_volume, amountToDecay, target_pitch, filtered_pitch;
+	double r, pitch=0.0, target_volume, target_pitch, filtered_pitch;
 	double diff;
 
 	pl->samplesSoFar += samples;
@@ -516,9 +540,8 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	{
 		// Simulate braking
 		if (pl->motor_speed > 0.1)
-		{	float brakespeed;
-   			get_variable_value("brakespeed", &brakespeed);
-			pl->motor_speed = pl->motor_speed - (double)samples / (brakespeed * 10);
+		{
+			pl->motor_speed = pl->motor_speed - (double)samples / (cfg_brakespeed * 10);
 		}
 		else
 		{	
@@ -541,19 +564,16 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		if (pl->pitch > 20.0) pl->pitch = 20.0;
 		if (pl->pitch < -20.0) pl->pitch = -20.0;
 
-		float slippiness;
-		get_variable_value("slippiness", &slippiness);
 		// Simulate slipmat for lasers/phasers
 		if (pl->pitch < pl->motor_speed - 0.1)
-			target_pitch = pl->pitch + (double)samples / slippiness;
+			target_pitch = pl->pitch + (double)samples / cfg_slippiness;
 		else if (pl->pitch > pl->motor_speed + 0.1)
-			target_pitch = pl->pitch - (double)samples / slippiness;
+			target_pitch = pl->pitch - (double)samples / cfg_slippiness;
 		else
 			target_pitch = pl->motor_speed;
 
-		// Pitch low-pass filter: matches SC1000 exactly (0.1/0.9 IIR)
-		float pitch_alpha;
-		get_variable_value("pitch_filter", &pitch_alpha);
+		// Pitch low-pass filter: matches SC1000 exactly at 0.1 (0.1/0.9 IIR)
+		double pitch_alpha = cfg_pitch_filter;
 		filtered_pitch = (pitch_alpha * target_pitch) + ((1.0 - pitch_alpha) * pl->pitch);
 
 		pl->tracking = false;
@@ -569,17 +589,14 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		 *
 		 * Here the measured platter velocity drives pitch directly
 		 * (feed-forward), and the SC1000 position loop only trims the
-		 * small error that remains. vel_ff = 0 gives the original
-		 * SC1000 behaviour exactly, governed by target_pitch and
-		 * pitch_filter. */
+		 * small error that remains. vel_ff = 0 (Speed assist Off, the
+		 * default) gives the original SC1000 behaviour exactly,
+		 * governed by target_pitch and pitch_filter. */
 
-		float user_gain, user_alpha, vel_ff;
+		double user_gain = cfg_target_pitch;
+		double user_alpha = cfg_pitch_filter;
+		double vel_ff = cfg_vel_ff;
 		double gain, pitch_alpha, vel = 0.0, age, corr_target;
-
-		get_variable_value("target_pitch", &user_gain);
-		get_variable_value("pitch_filter", &user_alpha);
-		if (!get_variable_value("vel_ff", &vel_ff))
-			vel_ff = 0.0f;
 
 		/* target_pitch and pitch_filter are the SC1000 loop settings;
 		 * they fade out as feed-forward takes over */
@@ -587,7 +604,7 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 		pitch_alpha = user_alpha + vel_ff * (TRACK_ALPHA - user_alpha);
 
 		age = monotonic_now() - pl->platter_time;
-		if (vel_ff > 0.0f && age >= 0.0 && age < PLATTER_STALE)
+		if (vel_ff > 0.0 && age >= 0.0 && age < PLATTER_STALE)
 			vel = pl->platter_velocity * vel_ff;
 		if (age > MAX_EXTRAPOLATE)
 			age = MAX_EXTRAPOLATE;
@@ -616,19 +633,21 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	}
 	pl->oldCapTouch = pl->capTouch;
 
-	// Fader volume ramp: fader_sharp=1.0 = instant, 0.0 = 20ms SC1000 style
-	float fader_sharpness;
-	get_variable_value("fader_sharp", &fader_sharpness);
-	if (fader_sharpness >= 1.0f) {
+	/* Fader volume. Fader smoothing Off jumps straight to the new
+	 * level, like the SC1000 (build_pcm still glides across this one
+	 * block). Otherwise glide at a rate that would cross the whole
+	 * range in that many milliseconds. */
+	double smooth_ms = cfg_fader_smooth;
+	if (smooth_ms < 0.5) {
 		pl->faderVolume = pl->faderTarget;
 	} else {
-		amountToDecay = (DECAYSAMPLES) / ((1.0 - fader_sharpness + 0.01) * (double)samples);
-		if (NearlyEqual(pl->faderTarget, pl->faderVolume, amountToDecay))
+		double step = (double)samples * pl->sample_dt * 1000.0 / smooth_ms;
+		if (NearlyEqual(pl->faderTarget, pl->faderVolume, step))
 			pl->faderVolume = pl->faderTarget;
 		else if (pl->faderTarget > pl->faderVolume)
-			pl->faderVolume += amountToDecay;
+			pl->faderVolume += step;
 		else
-			pl->faderVolume -= amountToDecay;
+			pl->faderVolume -= step;
 	}
 
 	// Volume: pitch-based volume (SC1000 style), then apply gain separately
@@ -636,9 +655,9 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	if (target_volume > 1.0)
 		target_volume = 1.0;
 	target_volume *= pl->setVolume;  // gain after pitch clamp
-	/* Ceiling raised to 8.0 since soft_clip() in build_pcm handles
-	 * saturation gracefully. Above ~1.0 you get progressive warm
-	 * distortion instead of hard digital clipping. */
+	/* Ceiling raised to 8.0 for the volume boost in Settings mode.
+	 * Above ~1.0 the output clips: hard by default, smoothly with the
+	 * Soft clip setting on. */
 	if (target_volume > 8.0)
 		target_volume = 8.0;
 
@@ -654,7 +673,8 @@ void player_collect(struct player *pl, signed short *pcm, unsigned samples)
 	else
 	{
 		r = build_pcm(pcm, samples, pl->sample_dt, pl->track,
-					  pl->position - pl->offset, pl->pitch, filtered_pitch, pl->volume, target_volume);
+					  pl->position - pl->offset, pl->pitch, filtered_pitch, pl->volume, target_volume,
+					  cfg_soft_clip >= 0.5f);
 		pl->pitch = filtered_pitch;
 		spin_unlock(&pl->lock);
 	}

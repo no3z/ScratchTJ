@@ -2,6 +2,13 @@
 # SC1000 config file #
 ######################
 # Any lines beginning with # are ignored
+#
+# ScratchTJ: settings that also appear in the Config menu
+# (platterspeed, slippiness, brakespeed, jogreverse, faderopenpoint,
+# faderclosepoint, cutbeats) are only DEFAULTS here. Once you change
+# them in the menu, the saved value in ~/.scratchtj/config.cfg wins.
+# Config > Reset Defaults goes back to the values in this file.
+# Every setting is explained in docs/SETTINGS.md
 
 
 
@@ -38,6 +45,13 @@ platterspeed=9100
 # Higher is longer, default = 3000
 brakespeed=3000
 
+# Slipmat: how fast the record gets back to speed when you let go
+# Lower is faster (tighter slipmat), default = 200
+#slippiness=200
+
+# 1 flips the platter direction, default = 1
+#jogreverse=1
+
 # Pitch range % of pitch bend MIDI command, default 50%
 pitchrange=50
 
@@ -48,6 +62,7 @@ mididelay=5
 
 # Set this to 1 or 2 to make the fader cut the beats
 # 1 will cut on the left, 2 will cut on the right
+# (0 = both ends cut the sample, the beats always play)
 cutbeats=0
 
 ####################

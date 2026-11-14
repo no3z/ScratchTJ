@@ -2,6 +2,7 @@
 #define OLED_DISPLAY_H
 
 #include "st7789.h"
+#include <stdbool.h>
 
 /* Display dimensions (re-export for menu code) */
 #define DISPLAY_WIDTH  ST7789_WIDTH
@@ -59,10 +60,17 @@ void oled_hline(int x, int y, int width);
 void oled_fill_rect(int x, int y, int w, int h, uint16_t color);
 void oled_flush(void);
 
+/* Screen saver: while blank the panel sleeps and oled_flush() sends
+ * nothing. Unblanking wakes the panel and shows the last frame. */
+void oled_set_blank(bool blank);
+bool oled_is_blank(void);
+
 /* High-level menu drawing helpers */
 void oled_draw_title_bar(const char *title);
 void oled_draw_menu_list(const char **items, int count, int selected,
                          int scroll_offset, int visible_lines);
+void oled_draw_value_list(const char **labels, const char **values, int count,
+                          int selected, int scroll_offset, int visible_lines);
 void oled_draw_value_screen(const char *name, const char *value_str,
                             const char *range_str);
 void oled_draw_confirm(const char *line1, const char *line2);
@@ -76,7 +84,7 @@ void oled_format_time(double seconds, char *buf, int bufsize);
 
 /* Fader curve graph for parameter editing */
 void oled_draw_fader_curve(int x, int y, int w, int h,
-                           float factor, float power, float decay);
+                           float factor, float power);
 
 /* Scroll offset helper - call after changing selectedItem */
 int oled_compute_scroll(int selected, int scroll_offset, int visible_lines);

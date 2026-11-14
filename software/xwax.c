@@ -51,6 +51,7 @@
 #include "lcd_menu.h"
 #include "alsa_mixer.h"
 #include "shared_variables.h"
+#include "settings.h"
 
 #define DEFAULT_IMPORTER EXECDIR "/xwax-import"
 
@@ -63,21 +64,6 @@ static const char *importer;
 SC_SETTINGS scsettings;
 
 struct mapping *maps = NULL;
-
-/* Editable variables (registered with shared_variables system) */
-float input_curveFactor = 0.1f;
-float input_curvePower = 0.2f;
-float input_curveSwitch = 1.0f;
-float slippiness = 200.f;
-float brakespeed = 3000.f;
-float platterspeed = 9100.0f;
-float target_pitch = 40.0f;
-float blipthreshold = 400.0f;
-float pitch_filter = 0.1f;
-float fader_sharpness = 1.0f;
-float vel_ff = 1.0f;
-float motion_touch = 0.0f;
-float fhist_secs = 2.0f;
 
 unsigned int countChars(char *string, char c)
 {
@@ -111,8 +97,9 @@ void loadSettings()
 	char *linetok, *valuetok;
 	// set defaults
 	scsettings.buffersize = 256;
-	scsettings.faderclosepoint = 2;
-	scsettings.faderopenpoint = 10;
+	/* SC500 values (Innofader Mini Pro) */
+	scsettings.faderclosepoint = 3;
+	scsettings.faderopenpoint = 5;
 	scsettings.platterenabled = 1;
 	scsettings.platterspeed = 9100;
 	scsettings.samplerate = 48000;
@@ -413,27 +400,9 @@ int main(int argc, char *argv[])
 	deck_load_folder(&deck[0], "/home/no3z/beats");
 	deck_load_folder(&deck[1], "/home/no3z/samples");	
 
-	register_variable("Fad Factor", &input_curveFactor, 0.01f, 10.0f, 0.01f);
-    register_variable("Fad Power", &input_curvePower, 0.01f, 10.0f, 0.01f);
-	register_variable("Fad Switch", &input_curveSwitch, 0.f, 1.0f, 1.0f);
-	register_variable("slippiness", &slippiness, 1.f, 3000.0f, 25.0f);
-	register_variable("target_pitch", &target_pitch, 1.f, 240.0f, 1.0f);
-    register_variable("brakespeed", &brakespeed, 1.f, 10000.0f, 500.0f);
-	register_variable("platterspeed", &platterspeed, 1.f, 32768.0f, 256.f);
-	register_variable("blipthreshold", &blipthreshold, 50.f, 2048.0f, 50.f);
-	register_variable("pitch_filter", &pitch_filter, 0.01f, 1.0f, 0.01f);
-	register_variable("fader_sharp", &fader_sharpness, 0.0f, 1.0f, 0.05f);
-	/* Platter velocity feed-forward: 1 = audio locked to the hand,
-	 * 0 = original SC1000 position-only tracking */
-	register_variable("vel_ff", &vel_ff, 0.0f, 1.0f, 0.1f);
-	/* 1 = a moving platter counts as touched, for playing without a
-	 * working capacitive touch sensor */
-	register_variable("motion_touch", &motion_touch, 0.0f, 1.0f, 1.0f);
-	register_variable("fhist_secs", &fhist_secs, 0.1f, 120.0f, 0.1f);
-
-	/* Sync scsettings.platterspeed (from config file) → float variable */
-	if (scsettings.platterspeed > 0)
-		platterspeed = (float)scsettings.platterspeed;
+	/* Settings the Config menu can change. Their defaults come from
+	 * scsettings.txt where it has them (see settings.c) */
+	settings_register();
 
 	/* Load saved config (overrides defaults and scsettings) */
 	load_variables_from_file("/home/no3z/.scratchtj/config.cfg");

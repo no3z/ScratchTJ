@@ -24,5 +24,8 @@ extern int cue_display_states[4];
 /* Hardware state (for home screen) */
 extern bool capIsTouched;
 extern unsigned int ADCs[4];
+extern volatile unsigned int cap_raw;            /* last touch sensor reading */
+extern volatile unsigned long input_activity_ms; /* CLOCK_MONOTONIC ms of the last
+                                                    platter/fader/touch/button use */
 
 #endif

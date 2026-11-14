@@ -108,6 +108,13 @@ void player_set_internal_playback(struct player *pl);
 void player_set_track(struct player *pl, struct track *track);
 void player_clone(struct player *pl, const struct player *from);
 
+/* A non-realtime thread (the display) that reads a player's track data
+ * holds this lock for the duration of the read. Swapping a player's track
+ * releases the old track under it, so the track can't be freed while it
+ * is being read. Keep the critical section short. */
+void player_track_read_lock(void);
+void player_track_read_unlock(void);
+
 double player_get_position(struct player *pl);
 double player_get_elapsed(struct player *pl);
 double player_get_remain(struct player *pl);

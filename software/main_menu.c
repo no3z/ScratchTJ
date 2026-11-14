@@ -196,7 +196,7 @@ static void draw_function_mode_strip(int y) {
         oled_text_color(76, y + 3, "2:", FONT_SMALL, THEME_CUE2_COLOR);
         oled_text_color(92, y + 3, "Spd", FONT_SMALL, RGB565(160, 160, 160));
         oled_text_color(120, y + 3, "3:", FONT_SMALL, THEME_CUE3_COLOR);
-        oled_text_color(136, y + 3, "S/S", FONT_SMALL, RGB565(160, 160, 160));
+        oled_text_color(136, y + 3, "Bnd", FONT_SMALL, RGB565(160, 160, 160));
         oled_text_color(168, y + 3, "4:", FONT_SMALL, THEME_CUE4_COLOR);
         oled_text_color(184, y + 3, "Vol", FONT_SMALL, RGB565(160, 160, 160));
     }
@@ -297,6 +297,128 @@ static void draw_platter(struct deck *d, int cx, int cy, int r,
     oled_text_color(cx - tw / 2, cy - 5, tbuf, FONT_SMALL, THEME_TEXT);
 }
 
+/* ── Waveform strip: ~2 s of the deck around the playhead ─────────
+ *
+ * Shows where sounds start and end, right of the platter. The playhead
+ * is the white line in the middle: the right half is what plays next
+ * when going forwards, the left half what just played.
+ *
+ * Cheap enough to redraw every frame: xwax already keeps a peak meter
+ * byte for every 64 samples (track->ppm, filled while the file loads),
+ * so ~2 s is about 1500 byte reads, with no audio decoding.
+ *
+ * Each column is a fixed slice of the track (a whole number of meter
+ * cells), so the shape scrolls without shimmering. Like playback, the
+ * strip loops: past the end wraps to the start, before the start is
+ * silence. Cue points show as dotted lines in their button colour.
+ * When the fader has cut this deck, the waveform turns grey. */
+#define WF_X       142
+#define WF_W        94
+#define WF_Y        80
+#define WF_H        62
+#define WF_SECONDS 2.0
+
+static uint16_t rgb565_half(uint16_t c)
+{
+    return (c >> 1) & 0x7BEF;
+}
+
+static void draw_waveform(struct deck *d, uint16_t accent)
+{
+    static const uint16_t cue_colors[4] = {
+        THEME_CUE1_COLOR, THEME_CUE2_COLOR, THEME_CUE3_COLOR, THEME_CUE4_COLOR
+    };
+    static unsigned char height_lut[256];
+    static bool lut_ready = false;
+    const int half = WF_H / 2;
+    const int mid_y = WF_Y + half;
+    const int center = WF_W / 2;
+
+    if (!lut_ready) {
+        /* Gate the meter's noise floor so silence draws nothing, then a
+         * square-root curve so quiet tails are still visible. */
+        for (int v = 0; v < 256; v++) {
+            int h = 0;
+            if (v > 2) {
+                h = (int)(sqrt((v - 2) / 253.0) * (half - 1) + 0.5);
+                if (h < 1) h = 1;
+            }
+            height_lut[v] = (unsigned char)h;
+        }
+        lut_ready = true;
+    }
+
+    unsigned char col_h[WF_W];
+    signed char col_cue[WF_W];
+    memset(col_h, 0, sizeof col_h);
+    memset(col_cue, -1, sizeof col_cue);
+
+    /* Copy what we need while holding the track: a load on another
+     * thread can't free it until we let go. */
+    player_track_read_lock();
+    struct track *tr = d->player.track;
+    unsigned int len = tr ? tr->length : 0;
+    int rate = tr ? tr->rate : 0;
+    if (len > 0 && rate > 0) {
+        int cells = (int)lround(WF_SECONDS * rate / WF_W / TRACK_PPM_RES);
+        if (cells < 1) cells = 1;
+        int64_t spc = (int64_t)cells * TRACK_PPM_RES;   /* samples per column */
+        double pos = player_get_elapsed(&d->player) * rate;
+        int64_t cc = (int64_t)floor(pos / (double)spc); /* playhead column */
+
+        int64_t cue_at[4];
+        for (int i = 0; i < 4; i++) {
+            double cp = cues_get(&d->cues, i);
+            cue_at[i] = -1;
+            if (cp != CUE_UNSET && cp >= 0.0)
+                cue_at[i] = (int64_t)(cp * rate) % len;
+        }
+
+        for (int c = 0; c < WF_W; c++) {
+            int64_t s = (cc + c - center) * spc;
+            if (s < 0)
+                continue;                       /* before the start */
+            unsigned int w0 = (unsigned int)(s % len);
+            unsigned int w = w0;
+            unsigned char peak = 0;
+            for (int k = 0; k < cells; k++) {
+                unsigned char v = track_get_ppm(tr, (int)w);
+                if (v > peak) peak = v;
+                w += TRACK_PPM_RES;
+                if (w >= len) w -= len;
+            }
+            col_h[c] = height_lut[peak];
+
+            for (int i = 0; i < 4; i++) {
+                if (cue_at[i] < 0) continue;
+                int64_t dlt = cue_at[i] - (int64_t)w0;
+                if (dlt < 0) dlt += len;
+                if (dlt < spc) col_cue[c] = (signed char)i;
+            }
+        }
+    }
+    player_track_read_unlock();
+
+    bool cut = d->player.faderVolume < 0.05;
+    uint16_t ahead = cut ? RGB565(110, 110, 110) : accent;
+    uint16_t behind = rgb565_half(ahead);
+
+    st7789_hline(WF_X, mid_y, WF_W, RGB565(30, 30, 30));
+    for (int c = 0; c < WF_W; c++) {
+        int h = col_h[c];
+        if (h > 0)
+            st7789_vline(WF_X + c, mid_y - h, 2 * h + 1,
+                         c < center ? behind : ahead);
+    }
+    for (int c = 0; c < WF_W; c++) {
+        if (col_cue[c] < 0) continue;
+        uint16_t cue_color = cue_colors[(int)col_cue[c]];
+        for (int y = WF_Y; y < WF_Y + WF_H; y += 2)
+            st7789_pixel(WF_X + c, y, cue_color);
+    }
+    st7789_vline(WF_X + center, WF_Y, WF_H, COLOR_WHITE);
+}
+
 static void draw_deck_compact(struct deck *d, int deck_num,
                               uint16_t accent, int y) {
     char buf[40];
@@ -381,61 +503,10 @@ void display_home_screen(struct deck *decks[], int deck_count) {
         get_variable_value("slippiness", &slip_val);
         snprintf(buf, sizeof(buf), "Slip: %.0f", slip_val);
         oled_text_color(145, 66, buf, FONT_SMALL, dim);
-
-        /* ── Fader history graph below text (right of platter) ─── */
-        #define FHIST_LEN 90
-        #define FHIST_X   145
-        #define FHIST_Y   82
-        #define FHIST_H   55
-        /* Auto-zoom: find max value in history buffer and scale to fill graph */
-        static float fader_history[FHIST_LEN] = {0};
-        static int fhist_idx = 0;
-
-        /* Push 1 sample per display frame → smooth 1px/frame scroll.
-         * Visible window = FHIST_LEN * HOME_REDRAW_INTERVAL_MS (~2sec at 22ms) */
-        fader_history[fhist_idx] = d_hero->player.faderVolume;
-        fhist_idx = (fhist_idx + 1) % FHIST_LEN;
-
-        /* Auto-zoom: find peak in history, scale so peak fills ~90% of graph */
-        float hist_max = 0.001f;
-        for (int i = 0; i < FHIST_LEN; i++) {
-            if (fader_history[i] > hist_max) hist_max = fader_history[i];
-        }
-        float auto_zoom = 0.9f / hist_max;
-        if (auto_zoom > 50.0f) auto_zoom = 50.0f;  /* cap zoom when silent */
-        if (auto_zoom < 1.0f) auto_zoom = 1.0f;
-
-        /* Baseline dim line */
-        oled_draw_line(FHIST_X, FHIST_Y + FHIST_H, FHIST_X + FHIST_LEN,
-                       FHIST_Y + FHIST_H, RGB565(30, 30, 30));
-
-        /* Draw scrolling history: oldest left, newest right */
-        for (int i = 0; i < FHIST_LEN - 1; i++) {
-            int si  = (fhist_idx + i) % FHIST_LEN;
-            int si2 = (fhist_idx + i + 1) % FHIST_LEN;
-            float v1 = fader_history[si] * auto_zoom;
-            float v2 = fader_history[si2] * auto_zoom;
-            if (v1 > 1.0f) v1 = 1.0f;
-            if (v2 > 1.0f) v2 = 1.0f;
-            int x1 = FHIST_X + i;
-            int x2 = FHIST_X + i + 1;
-            int y1 = FHIST_Y + FHIST_H - (int)(v1 * FHIST_H);
-            int y2 = FHIST_Y + FHIST_H - (int)(v2 * FHIST_H);
-
-            /* Bright fade: older = dimmer, newest = full accent */
-            int age = (FHIST_LEN - 1 - i);
-            int r_c = 255 - age * 2; if (r_c < 40) r_c = 40;
-            int g_c = 140 - age;     if (g_c < 20) g_c = 20;
-            oled_draw_line(x1, y1, x2, y2, RGB565(r_c, g_c, 0));
-
-            /* Fill below the line for a solid waveform look */
-            if (v1 > 0.01f) {
-                int fill_bright = 60 - age / 2; if (fill_bright < 10) fill_bright = 10;
-                for (int fy = y1 + 1; fy <= FHIST_Y + FHIST_H; fy++)
-                    st7789_pixel(x1, fy, RGB565(fill_bright, fill_bright / 3, 0));
-            }
-        }
     }
+
+    /* ── Waveform: ~2 s around the playhead (x=142..235, y=80..141) ── */
+    draw_waveform(d_hero, hero_accent);
 
     /* ── Full-width progress bar (y=150..156) — loop-aware ──── */
     double elapsed_raw = d_hero->player.track ? player_get_elapsed(&d_hero->player) : 0.0;

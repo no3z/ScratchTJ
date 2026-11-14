@@ -23,12 +23,12 @@ This project is based on the work by **[the_rasteri](https://github.com/rasteri)
 - Touch-sensitive HDD platter with capacitive sensing
 - Four cue buttons via Arduino (A0--A3) with short-press jump and long-press set
 - Two function modes for cue buttons: **CUE** (jump/set cue points) and **SETTINGS** (platter-based parameter control)
-- SETTINGS mode: hold button + rotate platter to adjust pitch, platterspeed, volume (gain), or toggle start/stop
+- SETTINGS mode: hold a button and turn the platter to adjust pitch, platter speed, tempo bend (±8%) or volume (up to 800%)
 - Active deck switching via rotary long press -- platter, cue buttons, and display follow selected deck
 - Live input recording from AudioInjector capture
-- Save/load configuration via Config menu
+- SC1000 / SC500-style defaults: hard-cut fader with open/close points and `cutbeats`, slipmat, brake, the same `scsettings.txt`
+- Config menu with every setting explained on screen, live sensor readouts, auto-save, and a screen saver
 - Binary serial protocol at 500 kbaud between Arduino and Pi
-- All key parameters tunable in real time from the menu or SETTINGS function buttons
 
 ![MK2 alternate angle -- TFT and platter closeup](docs/images/image8.jpeg)
 
@@ -103,7 +103,8 @@ The menu is driven by the EC11 rotary encoder (scroll + push) and the KB0 button
 HOME SCREEN
 │  Active deck platter visualization (fader arc, ghost/physical needles,
 │  touch glow, elapsed time), speed/pitch/motor/slip info column,
-│  fader history graph, progress bar, other deck compact strip,
+│  2-second waveform around the playhead (cue points marked, grey
+│  when the fader cuts the deck), progress bar, other deck strip,
 │  function mode info strip, cue flash banner, cue bar overlay
 │  Title bar shows [S] indicator when in SETTINGS mode
 │  Long press rotary = switch active deck (DECK 1 ↔ DECK 2)
@@ -143,11 +144,15 @@ HOME SCREEN
 ├── Config
 │   ├── Sound Settings ......... all ALSA mixer controls
 │   │   └── (per control) ...... volume slider, boolean, or enum
-│   ├── Global Settings ........ all registered shared variables
-│   │   └── (per variable) ..... value adjust with min/max/step
-│   │       (fader variables show live curve graph)
+│   ├── Platter ................ speed, direction, touch sensor, slipmat,
+│   │                            brake, tracking, speed assist, glitch filter
+│   ├── Fader & Volume ......... fader mode, cut beats, open/close points,
+│   │                            direction, curve, smoothing, soft clip
+│   ├── Screen ................. screen-off timer
+│   │   (each setting: value, live readout, default/range, plain-English
+│   │    help; KB0 keeps, knob push undoes; saved on leaving the section)
 │   ├── Save Config ............ writes to ~/.scratchtj/config.cfg
-│   ├── Reset Defaults ......... restores all to factory values
+│   ├── Reset Defaults ......... back to defaults (asks first)
 │   ├── Restart (rescan files) . restarts xwax so it re-reads beats/samples
 │   └── Reboot Pi .............. reboots the whole device
 │
@@ -181,32 +186,28 @@ Toggle via main menu item "Btn: CUE/SETTINGS". Default is SETTINGS on startup.
 
 | Button | Color | Function | Control |
 |--------|-------|----------|---------|
-| Btn 1 | Red | Pitch (note_pitch) | Hold + rotate platter (0.25x -- 4.0x) |
-| Btn 2 | Green | Platter Speed | Hold + rotate platter |
-| Btn 3 | Yellow | Start/Stop | Press to toggle |
-| Btn 4 | Blue | Volume (gain) | Hold + rotate platter (up to x3.60) |
+| Btn 1 | Red | Pitch: musical speed | Hold + turn platter (0.25x -- 4.0x) |
+| Btn 2 | Green | Platter speed | Hold + turn platter (same setting as Config > Platter) |
+| Btn 3 | Yellow | Bend: turntable-style tempo nudge for beat matching | Hold + turn platter (±8%) |
+| Btn 4 | Blue | Volume | Hold + turn platter (up to 800%) |
 
-When holding a SETTINGS button and rotating the platter, a live overlay shows the parameter name, value, and gauge bar. Audio position is frozen during adjustment. Config auto-saves when buttons are released.
+All four act on the active deck. While you hold a button and turn the platter, a live overlay shows the parameter name, value and a gauge bar, and the audio position is frozen. Settings are saved when you release the buttons.
 
-### Runtime-Tunable Parameters
+### Settings
 
-All adjustable live from Config > Global Settings:
+ScratchTJ starts out playing like an SC1000 / SC500. It reads the same `scsettings.txt` (platter speed, slipmat, brake, fader open/close points, `cutbeats`, button mappings), and its extras all start switched off.
 
-| Parameter | Default | Range | Step | Description |
-|-----------|---------|-------|------|-------------|
-| Fad Factor | 0.1 | 0.01 - 10 | 0.01 | Fader curve transition point |
-| Fad Power | 0.2 | 0.01 - 10 | 0.01 | Fader curve exponent |
-| Fad Switch | 1.0 | 0 - 1 | 1.0 | Fader direction (0=normal, 1=reversed) |
-| slippiness | 200 | 1 - 3000 | 25 | Slipmat simulation feel |
-| target_pitch | 40 | 1 - 240 | 1 | Position tracking gain |
-| brakespeed | 3000 | 1 - 10000 | 500 | Stop button deceleration rate |
-| platterspeed | 9100 | 1 - 32768 | 256 | Encoder-to-audio position ratio |
-| blipthreshold | 400 | 50 - 2048 | 50 | Encoder glitch rejection threshold |
-| pitch_filter | 0.1 | 0.01 - 1.0 | 0.01 | Pitch low-pass filter (0=smooth, 1=instant) |
-| fader_sharp | 1.0 | 0 - 1.0 | 0.05 | Fader sharpness |
-| vel_ff | 1.0 | 0 - 1.0 | 0.1 | Platter velocity feed-forward: 1 = audio locked to the hand, 0 = original SC1000 tracking (then governed by target_pitch / pitch_filter) |
-| motion_touch | 0 | 0 - 1 | 1 | 1 = a moving platter counts as touched, to play without a working capacitive touch sensor (a platter held still is released after 0.12 s) |
-| fhist_secs | 2.0 | 0.1 - 120 | 0.1 | Fader history graph time window (seconds) |
+Every setting can be changed live from **Config > Platter**, **Config > Fader & Volume** and **Config > Screen**:
+
+| Section | Settings |
+|---------|----------|
+| Platter | Platter speed, Reverse platter, Touch threshold, Touch by motion, Slipmat, Brake length, Tracking gain, Pitch response, Speed assist, Glitch filter |
+| Fader & Volume | Fader mode (SC1000 cut / Curve), Cut beats, Open point, Close point, Fader direction, Curve width, Curve shape, Fader smoothing, Soft clip |
+| Screen | Screen off after |
+
+Each setting's edit screen explains what it does and shows its default. Where it helps, it also shows a live reading, such as the touch sensor value, the fader position or the equivalent record rpm.
+
+**[Settings Guide](docs/SETTINGS.md)** covers every setting in plain English: what it does, the SC1000 value, and recipes for common problems. It also has the full `scsettings.txt` and `config.cfg` key reference.
 
 ### Serial Protocol
 
@@ -260,6 +261,7 @@ Hardware test and diagnostic scripts are in the [`hw_test/`](hw_test/) directory
 
 - **[Build Guide](docs/BUILD_GUIDE.md)** -- Step-by-step wiring and assembly
 - **[Installation](docs/INSTALLATION.md)** -- Software installation details
+- **[Settings Guide](docs/SETTINGS.md)** -- Every Config menu setting explained, plus `scsettings.txt` keys
 - **[Software Architecture](docs/SOFTWARE.md)** -- Thread model, subsystems
 - **[Enclosure Design](docs/enclosure/ENCLOSURE_DESIGN.md)** -- 3D printable parts
 - **[Parametric Encoder Mount](docs/enclosure/parametric_encoder_mount.scad)** -- OpenSCAD source for the MT6701 encoder mount (fully parametric)

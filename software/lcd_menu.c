@@ -9,6 +9,8 @@
 #include <time.h>
 #include "sc_input.h"
 #include "cues.h"
+#include "settings.h"
+#include "xwax.h"
 
 #define ROTARY_DEBOUNCE_DELAY 5
 
@@ -30,6 +32,62 @@ static unsigned long menu_millis(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (unsigned long)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* ── Screen saver ──────────────────────────────────────────────── */
+/* After "Screen off after" minutes without the knob, KB0, platter,
+ * fader, touch or cue buttons being used, the panel is put to sleep.
+ * Playing the instrument wakes it; so does the knob or KB0, whose
+ * first event is then swallowed so it does not also act on the menu.
+ *
+ * Everything here runs on the menu thread, the only one that talks to
+ * the display. The input thread just stamps input_activity_ms. */
+
+static unsigned long screen_blanked_at = 0;
+
+static void screen_wake(unsigned long now) {
+    oled_set_blank(false);
+    lastActivityTime = now;
+    needsUpdate = true;
+}
+
+/* Called on every poll of the knob. Returns true while the screen is off */
+static bool screen_saver_poll(void) {
+    unsigned long now = menu_millis();
+    unsigned long input = input_activity_ms;
+    unsigned long last = lastActivityTime;
+
+    /* Latest of the menu and the playing controls (wrap-safe) */
+    if ((long)(input - last) > 0)
+        last = input;
+
+    if (oled_is_blank()) {
+        if ((long)(input - screen_blanked_at) > 0)
+            screen_wake(now);
+        return oled_is_blank();
+    }
+
+    if (cfg_screen_off < 1.0f)
+        return false;
+    /* Keep the screen on while recording, to see that it is */
+    if (deck[0].player.recording || deck[1].player.recording)
+        return false;
+
+    if (now - last >= (unsigned long)(cfg_screen_off * 60000.0f)) {
+        screen_blanked_at = now;
+        oled_set_blank(true);
+        return true;
+    }
+    return false;
+}
+
+/* A knob or KB0 event arrived: wake the screen if it is off.
+ * Returns true if the event was used up waking it */
+static bool screen_wake_by_menu(void) {
+    if (!oled_is_blank())
+        return false;
+    screen_wake(menu_millis());
+    return true;
 }
 
 void lcd_menu_init(struct deck *deck_array[], int count) {
@@ -82,8 +140,9 @@ void poll_rotary_encoder() {
      * and auto-return caused problems during recording and other
      * functional screens (volume adjust, etc.) */
 
-    /* Periodic redraw for home screen (live data at ~10fps) */
-    if (mainMenuState == MENU_HOME &&
+    /* Periodic redraw for home screen (live data at ~45fps); not
+     * while the screen is off, there is nothing to see */
+    if (mainMenuState == MENU_HOME && !oled_is_blank() &&
         (now - lastHomeRedrawTime) >= HOME_REDRAW_INTERVAL_MS) {
         lastHomeRedrawTime = now;
         needsUpdate = true;
@@ -115,6 +174,8 @@ int rotary_encoder_moved() {
     static int lastState = -1;
     static int accumulator = 0;
 
+    screen_saver_poll();
+
     int clk = gpio_read(ROTARY_CLK);
     int dt = gpio_read(ROTARY_DT);
     int currentState = (clk << 1) | dt;
@@ -136,11 +197,11 @@ int rotary_encoder_moved() {
     if (accumulator >= 4) {
         accumulator = 0;
         lastActivityTime = menu_millis();
-        return 1;  /* CW */
+        return screen_wake_by_menu() ? 0 : 1;  /* CW */
     } else if (accumulator <= -4) {
         accumulator = 0;
         lastActivityTime = menu_millis();
-        return -1; /* CCW */
+        return screen_wake_by_menu() ? 0 : -1; /* CCW */
     }
 
     return 0;
@@ -174,7 +235,7 @@ int rotary_button_pressed() {
             (now - lastButtonPressTime) >= ROTARY_LONG_PRESS_MS) {
             longPressFired = true;
             lastActivityTime = menu_millis();
-            return 2;  /* long press = mode toggle */
+            return screen_wake_by_menu() ? 0 : 2;  /* long press = mode toggle */
         }
     } else {
         releasedCount++;
@@ -186,7 +247,7 @@ int rotary_button_pressed() {
                 lastButtonPressTime = 0;
                 lastActivityTime = menu_millis();
                 longPressFired = false;
-                return 1;  /* short click = back */
+                return screen_wake_by_menu() ? 0 : 1;  /* short click = back */
             }
             longPressFired = false;
         }
@@ -213,7 +274,7 @@ int kb0_button_pressed() {
                 kb0PressTime = 0;
                 kb0LastRelease = now;
                 lastActivityTime = menu_millis();
-                return 1;  /* click = select */
+                return screen_wake_by_menu() ? 0 : 1;  /* click = select */
             }
         }
         kb0PressTime = 0;

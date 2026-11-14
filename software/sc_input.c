@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <math.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/i2c.h>
@@ -37,6 +38,7 @@
 #include <linux/serial.h>
 #include <sys/ioctl.h>
 #include "shared_variables.h"
+#include "settings.h"
 #include "oled_display.h"
 #include "platter.h"
 
@@ -507,6 +509,8 @@ int file_i2c_rot, file_i2c_pic;
 int pitchMode = 0;
 int oldPitchMode = 0;
 bool capIsTouched = 0;
+volatile unsigned int cap_raw = 0;            /* last touch sensor reading */
+volatile unsigned long input_activity_ms = 0; /* last time a control was used */
 unsigned char buttons[4] = {0, 0, 0, 0}, totalbuttons[4] = {0, 0, 0, 0};
 unsigned int ADCs[4] = {0, 0, 0, 0};
 unsigned char buttonState = 0;
@@ -606,6 +610,11 @@ void process_cue_buttons(uint8_t button_byte) {
     last_button_byte = button_byte;
 }
 
+/* Note that the player used a control, for the screen saver */
+static void note_activity(void) {
+    input_activity_ms = millis_now();
+}
+
 /* ── Binary serial read (ring buffer with sync byte scanning) ── */
 static void read_serial_data(void) {
     static uint8_t ring[256];
@@ -657,11 +666,11 @@ static void read_serial_data(void) {
         }
 
         if (valid) {
-            /* Process fader */
-            float curveSwitch;
-            bool switchFader = false;
-            get_variable_value("Fad Switch", &curveSwitch);
-            if (curveSwitch > 0.5) switchFader = true;
+            static int activity_fader = -1;
+            static int activity_btn = -1;
+
+            /* Process fader ("Fader direction" setting: 1 = normal) */
+            bool switchFader = cfg_fader_switch > 0.5f;
 
             ADCs[0] = switchFader ? fader_value : (1023 - fader_value);
             ADCs[1] = switchFader ? (1023 - fader_value) : fader_value;
@@ -669,7 +678,20 @@ static void read_serial_data(void) {
             ADCs[3] = switchFader ? (1023 - fader_value) : fader_value;
 
             /* Process capacitive touch */
-            capIsTouched = (cap_value > 5000) ? 1 : 0;
+            bool touched = cap_value > (int)cfg_touch_threshold;
+            cap_raw = cap_value;
+
+            /* Screen saver: a new touch, a real fader move (not
+             * jitter) or a button change counts as using the unit */
+            if ((touched && !capIsTouched) ||
+                activity_fader < 0 || abs(fader_value - activity_fader) > 20 ||
+                btn != activity_btn) {
+                if (activity_fader >= 0)
+                    note_activity();
+                activity_fader = fader_value;
+                activity_btn = btn;
+            }
+            capIsTouched = touched;
 
             /* Process cue buttons (v2 only, v1 has no button byte) */
             if (pkt_len == PKTLEN_V2)
@@ -683,16 +705,13 @@ static void read_serial_data(void) {
     }
 }
 
-void process_pic()
+/* Curve mode: a crossfade between the decks, shaped by Curve width
+ * (Fad Factor) and Curve shape (Fad Power) */
+static void process_fader_curve(void)
 {
-    if (ADCs[0] < 0) ADCs[0] = 0;
-    if (ADCs[0] > 1023) ADCs[0] = 1023;
-
     double fader = ADCs[0] / 1023.0;
-	float curveFactor;
-    get_variable_value("Fad Factor", &curveFactor);
-	float curvePower;
-    get_variable_value("Fad Power", &curvePower);
+    double curveFactor = cfg_curve_factor;
+    double curvePower = cfg_curve_power;
 
     /* Deadzone at extremes: hard-cut below 0.5% or above 99.5%
      * (matches SC500 faderopenpoint=5/1023 ≈ 0.49% for Innofader Mini Pro) */
@@ -711,6 +730,57 @@ void process_pic()
         deck[1].player.faderTarget = pow((1.0 - fader) / curveFactor, curvePower);
         if (deck[1].player.faderTarget > 1.0) deck[1].player.faderTarget = 1.0;
     }
+}
+
+/* SC1000 cut mode, as on the SC1000/SC500: each end of the fader is a
+ * switch with hysteresis. Away from the ends both decks play at full
+ * volume; at an end, the sample is cut (or the beats, with Cut beats
+ * set for that end).
+ *
+ * ADCs[0] and ADCs[1] are the distances from the two ends. An open end
+ * closes when it gets nearer than the close point, and a closed end
+ * only opens again beyond the open point, so a fader resting on the
+ * edge does not crackle. */
+static void process_fader_sc1000(void)
+{
+    int open = (int)cfg_fader_open;
+    int close = (int)cfg_fader_close;
+    int cutbeats = (int)lroundf(cfg_cutbeats);
+    double target0 = 1.0, target1 = 1.0;
+
+    if (close > open)
+        close = open;
+
+    int cut1 = faderOpen1 ? close : open;
+    int cut2 = faderOpen2 ? close : open;
+
+    faderOpen1 = 1;
+    faderOpen2 = 1;
+
+    if ((int)ADCs[0] < cut1) {
+        if (cutbeats == 1) target0 = 0.0;
+        else target1 = 0.0;
+        faderOpen1 = 0;
+    }
+    if ((int)ADCs[1] < cut2) {
+        if (cutbeats == 2) target0 = 0.0;
+        else target1 = 0.0;
+        faderOpen2 = 0;
+    }
+
+    deck[0].player.faderTarget = target0;
+    deck[1].player.faderTarget = target1;
+}
+
+void process_pic()
+{
+    if (ADCs[0] > 1023) ADCs[0] = 1023;
+    if (ADCs[1] > 1023) ADCs[1] = 1023;
+
+    if (cfg_fader_mode >= 0.5f)
+        process_fader_curve();
+    else
+        process_fader_sc1000();
 }
 
 /* ── Settings parameter adjustment via platter ────────────────── */
@@ -818,6 +888,8 @@ static unsigned int numBlips = 0;
 #define MOTION_REANCHOR 0.25
 
 static bool motionTouched = false;
+static int64_t activity_anchor;     /* platter count at the last activity check */
+static double activity_time;
 static int64_t motion_anchor;       /* platter count the travel is measured from */
 static double motion_time;          /* when the platter last moved (or was anchored) */
 
@@ -874,13 +946,11 @@ void process_rot(int raw, double when)
 {
 	int ad = active_deck;
 	struct deck *d = &deck[ad];
-	float platterspeed, blipthreshold;
+	float platterspeed = cfg_platterspeed;
+	float blipthreshold = cfg_blipthreshold;
 	int delta;
 
-	get_variable_value("platterspeed", &platterspeed);
-	get_variable_value("blipthreshold", &blipthreshold);
-
-	if (scsettings.jogReverse)
+	if (cfg_jogreverse >= 0.5f)
 		raw = (ENCODER_CPR - 1) - raw;
 
 	d->newEncoderAngle = raw;
@@ -928,12 +998,25 @@ void process_rot(int raw, double when)
 	d->angleOffset += delta - (raw - d->encoderAngle);
 	d->encoderAngle = raw;
 
-	float motion_touch = 0.0f;
-	get_variable_value("motion_touch", &motion_touch);
-	if (motion_touch >= 0.5f)
+	if (cfg_motion_touch >= 0.5f)
 		motion_touch_update(when);
 	else
 		motion_touch_reset(when);
+
+	/* Screen saver: about 1.5 degrees of real travel counts as using
+	 * the platter. The anchor is re-taken every couple of seconds so
+	 * sensor jitter and slow creep never add up to a wake-up. */
+	{
+		int64_t travel = platter.count - activity_anchor;
+		if (travel > 64 || travel < -64) {
+			note_activity();
+			activity_anchor = platter.count;
+			activity_time = when;
+		} else if (when - activity_time > 2.0) {
+			activity_anchor = platter.count;
+			activity_time = when;
+		}
+	}
 
 	/* SETTINGS mode: divert platter to parameter adjustment */
 	if (settings_buttons_held != 0) {
@@ -945,8 +1028,9 @@ void process_rot(int raw, double when)
 		 * not position-tracking (which would freeze pitch to 0) */
 		d->player.capTouch = 0;
 		motion_touch_reset(when);
-		/* Resync offset for when user releases button and resumes scratching */
-		get_variable_value("platterspeed", &platterspeed);
+		/* Resync offset for when user releases button and resumes
+		 * scratching (Btn 2 may just have changed platterspeed) */
+		platterspeed = cfg_platterspeed;
 		d->angleOffset = (d->player.position * platterspeed) - d->encoderAngle;
 		return;
 	}

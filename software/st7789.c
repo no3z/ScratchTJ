@@ -286,6 +286,22 @@ int st7789_string_width(const char *str, int scale)
     return (int)strlen(str) * 8 * scale;
 }
 
+void st7789_sleep(int sleep)
+{
+    if (spi_fd < 0) return;
+
+    if (sleep) {
+        tft_cmd(0x28);   /* display off: panel shows a blank (black) page */
+        tft_cmd(0x10);   /* sleep in: stops the panel driver */
+        usleep(5000);
+    } else {
+        tft_cmd(0x11);   /* sleep out */
+        usleep(120000);  /* datasheet: 120 ms before the next sleep command,
+                          * and the supply settles before display on */
+        tft_cmd(0x29);   /* display on */
+    }
+}
+
 void st7789_flush(void)
 {
     if (spi_fd < 0) return;

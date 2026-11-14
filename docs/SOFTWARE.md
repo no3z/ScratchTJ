@@ -27,7 +27,7 @@ Main thread (xwax)
         Renders TFT display
 ```
 
-All shared state between threads is protected by mutexes in the `shared_variables` system.
+Settings are plain `float` globals (`cfg_*`, see `settings.h`). The audio and input threads read them directly, since a float read is atomic. Only the menu thread writes them, through the `shared_variables` registry.
 
 ---
 
@@ -39,15 +39,21 @@ The central input module. Runs in its own thread started by `SC_Input_Start()`.
 
 **Responsibilities:**
 - Opens `/dev/ttyUSB0` at 500,000 baud
-- Parses 6-byte Arduino packets (sync, fader, cap touch, checksum)
+- Parses 7-byte Arduino packets (sync, fader, cap touch, cue buttons, checksum)
 - Reads MT6701 angle over I2C (`/dev/i2c-1`, address 0x06)
 - Converts raw angle to deck position using `platterspeed` ratio
-- Processes capacitive touch (touch/release detection with threshold)
+- Processes capacitive touch: touched when the reading is above `cfg_touch_threshold`, or, with `cfg_motion_touch` on, while the platter turns
+- Fader, in two modes chosen by `cfg_fader_mode`:
+  - `process_fader_sc1000()` is the SC1000 hard cut: hysteresis on each end (`cfg_fader_open` / `cfg_fader_close`), with `cfg_cutbeats` choosing which end, if any, cuts the beats deck;
+  - `process_fader_curve()` is the ScratchTJ crossfade curve (`cfg_curve_factor` / `cfg_curve_power`).
 - Reads cue button states via GPIO
 - Calls into xwax deck API to update fader position, platter angle, touch state
+- Stamps `input_activity_ms` whenever the user plays (touch, fader, buttons, platter), for the screen saver
 
 **Key globals:**
 - `capIsTouched` -- current touch state
+- `cap_raw` -- last raw touch-sensor reading (shown live in the Touch threshold editor)
+- `input_activity_ms` -- `CLOCK_MONOTONIC` ms of the last player activity
 - `ADCs[4]` -- raw analog readings
 - `cue_display_states[4]` -- cue point states for display
 
@@ -60,6 +66,7 @@ Low-level SPI framebuffer driver for the 240x240 ST7789 display.
 - All drawing operations write to the framebuffer
 - `st7789_flush()` sends the entire framebuffer over SPI in one transfer
 - Uses `/dev/spidev0.0` with direct GPIO for DC and RST pins
+- `st7789_sleep(1)` sends DISPOFF + SLPIN, and `st7789_sleep(0)` sends SLPOUT + DISPON. The screen saver uses these. The backlight pin (BLK) is wired to 3.3 V, so the backlight itself stays lit.
 
 **Drawing primitives:**
 - `st7789_pixel()`, `st7789_hline()`, `st7789_vline()`
@@ -81,7 +88,10 @@ Provides themed, menu-aware drawing functions on top of the ST7789 driver. Despi
 **High-level drawing functions:**
 - `oled_draw_title_bar()` -- renders a colored title bar
 - `oled_draw_menu_list()` -- scrollable list with selection highlight and scrollbar
+- `oled_draw_value_list()` -- scrollable list with a right-aligned value per row (Config sections)
 - `oled_draw_value_screen()` -- parameter editing display (name, value, range)
+- `oled_draw_fader_curve()` -- both decks' Curve-mode volume curves
+- `oled_set_blank()` / `oled_is_blank()` -- screen saver. While blank, `oled_flush()` skips the SPI transfer, and waking re-sends the framebuffer.
 - `oled_draw_cue_bar()` -- colored cue point indicators with position
 - `oled_draw_progress_bar()`, `oled_draw_center_fader()` -- visualization widgets
 - `oled_draw_confirm()` -- yes/no confirmation dialog
@@ -119,6 +129,11 @@ MENU_HOME <---> MENU_MAIN
 - Detects rotation direction and button press/release
 - KB0 button supports short press (back) and long press (home)
 
+**Screen saver:** `screen_saver_poll()` runs at the start of `rotary_encoder_moved()`, which every menu loop calls.
+- It blanks the screen after `cfg_screen_off` minutes with no knob, KB0 or `input_activity_ms` activity.
+- It never blanks while a deck is recording.
+- Any activity wakes the screen. A knob turn or press that wakes the screen is swallowed, so it does not also move the menu.
+
 ### main_menu.c -- Home Screen & Top Menu
 
 **Home screen displays:**
@@ -126,6 +141,7 @@ MENU_HOME <---> MENU_MAIN
 - Deck play/pause state with colored indicators
 - Elapsed time and remaining time
 - Fader position visualization
+- Waveform strip (`draw_waveform()`): about 2 s of the active deck centred on the playhead, right of the platter. Built from the per-64-sample peak meter xwax fills while importing (`track_get_ppm()`), so a frame costs about 1500 byte reads. The draw holds `player_track_read_lock()` so a track swap on another thread can't free the track mid-read.
 - Cue point bar (4 slots with colors)
 - Touch state indicator
 
@@ -147,9 +163,16 @@ Provides file browsing, playback control, volume adjustment, and recording for e
 
 **Sub-menus:**
 - **Sound Settings** -- ALSA mixer parameters (volume, gain, etc.)
-- **Global Settings** -- all registered shared variables with real-time editing
+- **Platter / Fader & Volume / Screen** -- `enter_settings_section()` lists the settings whose `section` matches, each with its formatted value. The editor screen shows:
+  - the value;
+  - a live readout (record rpm, touch sensor, fader position);
+  - the default and range;
+  - the wrapped `help` text;
+  - for Curve settings, the curve graph.
+
+  Values change live. Turning fast takes bigger steps. KB0 keeps the value, and knob push restores the old one. The section saves to `config.cfg` on exit if anything changed.
 - **Save Config** -- persist current settings to file
-- **Reset Defaults** -- restore factory defaults
+- **Reset Defaults** -- after confirmation, reset every setting to its default and save
 - **Restart (rescan files)** -- restart xwax in place so it re-reads the beats and samples folders (same as `sudo kill -USR1 $(pgrep xwax)`)
 - **Reboot Pi** -- reboot the whole device
 
@@ -161,16 +184,37 @@ Provides file browsing, playback control, volume adjustment, and recording for e
 - Last-used preset number is stored and auto-loaded on startup
 - Menu shows slot status (empty/saved) and allows save/load operations
 
+### settings.c -- Settings Table
+
+One table (`SettingInfo[]`) describes every setting in the Config menu. Each entry has:
+- the config key and pointer to its `cfg_*` global;
+- the on-screen label and menu section;
+- its kind: number, On/Off, or choice list;
+- min, max and step;
+- its unit, decimals and zero text (for example "Off" or "Never");
+- a plain-English help text.
+
+`settings_register()` runs after `loadSettings()`:
+1. It seeds values from `scsettings.txt` (platterspeed, slippiness, brakespeed, jogreverse, faderopen/closepoint, cutbeats).
+2. It clamps each value into its range.
+3. It registers each entry, so the `scsettings.txt` values become the defaults that Reset Defaults returns to.
+
+To add a setting:
+1. Declare an `extern float cfg_x` in `settings.h`.
+2. Define it and add a table entry in `settings.c`.
+3. Read `cfg_x` where it is used.
+4. Document it in `docs/SETTINGS.md`.
+
 ### shared_variables.c -- Configuration Registry
 
-Thread-safe registry of runtime-adjustable parameters.
+The registry of runtime-adjustable parameters.
 
 **Features:**
-- Variables registered with name, pointer, min/max, step size, default
-- Mutex-protected read/write access
-- Serialize to/from file (key=value format)
+- `register_setting()` takes the full metadata (label, section, help, kind, unit, choices). `register_variable()` remains for plain numbers.
+- `format_variable_value()` formats a value for display: On/Off, choice text, zero text, or a number with its unit.
+- Serializes to and from `~/.scratchtj/config.cfg` in key=value format, writing a `# Section > Label` comment above each key. On load, unknown keys are reported and skipped, and values are clamped into range.
 - Bulk reset to defaults
-- Used by the menu system for real-time parameter editing
+- `find_variable()` / `get_variable_value()` look up by name without locking. Realtime code should read the `cfg_*` globals instead.
 
 ---
 
@@ -202,7 +246,7 @@ No wiringPi, no Python, no Node.js. The entire system is pure C with standard Li
                    /dev/ttyUSB0
                    500,000 baud
                         |
-                    [6-byte packet]
+                    [7-byte packet]
                     fader + cap touch
                         |
                         v
@@ -248,4 +292,6 @@ MIDI mappings:
 midii=status,channel,data,edge,action
 ```
 
-See the comments in `scsettings.txt` for full documentation of all parameters.
+See the comments in `scsettings.txt`, and [SETTINGS.md](SETTINGS.md) for every key.
+
+Values saved from the Config menu go to `~/.scratchtj/config.cfg`, in the same key=value format. They override `scsettings.txt`. Presets (`preset_N.cfg`) store the same keys.

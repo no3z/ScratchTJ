@@ -176,14 +176,9 @@ void save_preset_to_slot(int slot, struct deck *decks[]) {
 
     // Save integer settings
     fprintf(f, "[settings_int]\n");
+    /* Platter, fader and jog settings are Config menu settings now and
+     * go in [settings_float] with the rest */
     fprintf(f, "buffersize=%d\n", scsettings.buffersize);
-    fprintf(f, "platterspeed=%d\n", scsettings.platterspeed);
-    fprintf(f, "slippiness=%d\n", scsettings.slippiness);
-    fprintf(f, "brakespeed=%d\n", scsettings.brakespeed);
-    fprintf(f, "faderopenpoint=%d\n", scsettings.faderopenpoint);
-    fprintf(f, "faderclosepoint=%d\n", scsettings.faderclosepoint);
-    fprintf(f, "jogReverse=%d\n", scsettings.jogReverse);
-    fprintf(f, "cutbeats=%d\n", scsettings.cutbeats);
     fprintf(f, "pitchrange=%d\n", scsettings.pitchrange);
     fprintf(f, "\n");
 
@@ -252,14 +247,14 @@ void load_preset_from_slot(int slot, struct deck *decks[]) {
             } else if (strcmp(section, "settings_int") == 0) {
                 int intval = atoi(value);
                 if (strcmp(key, "buffersize") == 0) scsettings.buffersize = intval;
-                else if (strcmp(key, "platterspeed") == 0) scsettings.platterspeed = intval;
-                else if (strcmp(key, "slippiness") == 0) scsettings.slippiness = intval;
-                else if (strcmp(key, "brakespeed") == 0) scsettings.brakespeed = intval;
-                else if (strcmp(key, "faderopenpoint") == 0) scsettings.faderopenpoint = intval;
-                else if (strcmp(key, "faderclosepoint") == 0) scsettings.faderclosepoint = intval;
-                else if (strcmp(key, "jogReverse") == 0) scsettings.jogReverse = intval;
-                else if (strcmp(key, "cutbeats") == 0) scsettings.cutbeats = intval;
                 else if (strcmp(key, "pitchrange") == 0) scsettings.pitchrange = intval;
+                /* Presets from before these became Config menu settings.
+                 * A [settings_float] value, read later, wins. */
+                else if (strcmp(key, "jogReverse") == 0) set_variable_value("jogreverse", (float)intval);
+                else if (strcmp(key, "platterspeed") == 0 || strcmp(key, "slippiness") == 0 ||
+                         strcmp(key, "brakespeed") == 0 || strcmp(key, "faderopenpoint") == 0 ||
+                         strcmp(key, "faderclosepoint") == 0 || strcmp(key, "cutbeats") == 0)
+                    set_variable_value(key, (float)intval);
             } else if (strcmp(section, "settings_float") == 0) {
                 float floatval = atof(value);
                 set_variable_value(key, floatval);

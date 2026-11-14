@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include "sc_midimap.h"
 #include "xwax.h"
+#include "settings.h"
 
 /*
 void add_IO_mapping(struct mapping **maps, unsigned char Pin, bool Pullup, bool Edge, unsigned char DeckNo, unsigned char Action, unsigned char Param)
@@ -226,9 +227,8 @@ void IOevent(struct mapping *map, unsigned char MidiBuffer[3])
 		}
 		else if (map->Action == ACTION_JOGREVERSE)
 		{
-			printf("Reversed Jog Wheel - %d", scsettings.jogReverse);
-			scsettings.jogReverse = !scsettings.jogReverse;
-			printf(",%d", scsettings.jogReverse);
+			cfg_jogreverse = (cfg_jogreverse >= 0.5f) ? 0.0f : 1.0f;
+			printf("Reversed Jog Wheel - now %d\n", (int)cfg_jogreverse);
 		}
 		else if (map->Action == ACTION_BEND) // temporary bend of pitch that goes on top of the other pitch values
 		{

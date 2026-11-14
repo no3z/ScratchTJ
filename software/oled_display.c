@@ -26,6 +26,9 @@ static int overlay_cue_states[4] = {0, 0, 0, 0};
 static double overlay_cue_positions[4] = {0, 0, 0, 0};
 static bool overlay_enabled = false;
 
+/* Screen saver state */
+static bool screen_blank = false;
+
 int oled_init(void) {
     return st7789_init("/dev/spidev0.0", 24, 25);
 }
@@ -66,14 +69,31 @@ void oled_fill_rect(int x, int y, int w, int h, uint16_t color) {
 void oled_flush(void) {
     if (overlay_enabled)
         oled_draw_cue_bar(overlay_cue_states, overlay_cue_positions);
-    st7789_flush();
+    if (!screen_blank)
+        st7789_flush();
+}
+
+void oled_set_blank(bool blank) {
+    if (blank == screen_blank)
+        return;
+    screen_blank = blank;
+    st7789_sleep(blank);
+    if (!blank)
+        st7789_flush();   /* the last frame drawn, so the screen is never empty */
+}
+
+bool oled_is_blank(void) {
+    return screen_blank;
 }
 
 void oled_draw_title_bar(const char *title) {
     /* Blue background bar */
     st7789_fill_rect(0, 0, DISPLAY_WIDTH, TITLE_BAR_HEIGHT, THEME_TITLE_BG);
-    /* Title text in medium font (2x scale) */
-    st7789_draw_string(4, TITLE_TEXT_Y, title, THEME_TITLE_FG, FONT_MEDIUM);
+    /* Title text in medium font (2x scale); small if it would not fit */
+    if (st7789_string_width(title, FONT_MEDIUM) <= DISPLAY_WIDTH - 8)
+        st7789_draw_string(4, TITLE_TEXT_Y, title, THEME_TITLE_FG, FONT_MEDIUM);
+    else
+        st7789_draw_string(4, TITLE_TEXT_Y + 4, title, THEME_TITLE_FG, FONT_SMALL);
     /* Separator line */
     st7789_hline(0, SEPARATOR_Y, DISPLAY_WIDTH, THEME_SEPARATOR);
 }
@@ -116,6 +136,27 @@ void oled_draw_menu_list(const char **items, int count, int selected,
         /* Thumb */
         st7789_fill_rect(SCROLLBAR_X, bar_y,
                          SCROLLBAR_WIDTH, bar_height, THEME_SCROLLTHUMB);
+    }
+}
+
+/* A list like oled_draw_menu_list, with each item's value shown on the
+ * right of its row */
+void oled_draw_value_list(const char **labels, const char **values, int count,
+                          int selected, int scroll_offset, int visible_lines) {
+    oled_draw_menu_list(labels, count, selected, scroll_offset, visible_lines);
+
+    int right = (count > visible_lines) ? SCROLLBAR_X - 4 : DISPLAY_WIDTH - 4;
+    for (int i = 0; i < visible_lines && (scroll_offset + i) < count; i++) {
+        int item_idx = scroll_offset + i;
+        int y = LIST_START_Y + i * LINE_HEIGHT;
+        const char *v = values[item_idx];
+        if (!v) continue;
+        int vw = st7789_string_width(v, FONT_SMALL);
+        uint16_t bg = (item_idx == selected) ? THEME_SELECT_BG : THEME_BG;
+        uint16_t fg = (item_idx == selected) ? THEME_SELECT_FG : THEME_VALUE_FG;
+        /* Clear a little space so a long label never runs into the value */
+        st7789_fill_rect(right - vw - 6, y, vw + 6, LINE_HEIGHT, bg);
+        st7789_draw_string(right - vw, y + 2, v, fg, FONT_SMALL);
     }
 }
 
@@ -277,9 +318,11 @@ void oled_draw_cue_bar(const int states[4], const double positions[4]) {
     }
 }
 
+/* Curve-mode crossfade: beats (deck 1) and sample (deck 2) volume
+ * across the fader, as process_fader_curve() computes it */
 void oled_draw_fader_curve(int x, int y, int w, int h,
-                           float factor, float power, float decay) {
-    /* Draw axes */
+                           float factor, float power) {
+    /* Axes */
     oled_draw_line(x, y, x, y + h, THEME_SCROLLBAR);           /* Y axis */
     oled_draw_line(x, y + h, x + w, y + h, THEME_SCROLLBAR);   /* X axis */
 
@@ -287,42 +330,33 @@ void oled_draw_fader_curve(int x, int y, int w, int h,
     st7789_draw_string(x - 8, y - 2, "V", THEME_RANGE_FG, FONT_SMALL);
     st7789_draw_string(x + w - 8, y + h + 2, "F", THEME_RANGE_FG, FONT_SMALL);
 
-    /* Draw the fader curve: left half (deck 0 volume) */
-    int prev_y_val = -1;
+    int prev0 = -1, prev1 = -1;
     for (int i = 0; i <= w; i++) {
         float fader = (float)i / (float)w;  /* 0..1 fader position */
-        float vol;
+        float vol0, vol1;
 
-        if (fader < 0.02f) {
-            vol = 0.0f;
+        if (fader < 0.005f) {
+            vol0 = 0.0f; vol1 = 1.0f;
+        } else if (fader > 0.995f) {
+            vol0 = 1.0f; vol1 = 0.0f;
         } else if (fader <= 0.5f) {
-            vol = powf(fader / factor, power);
-            if (vol > 1.0f) vol = 1.0f;
+            vol1 = 1.0f;
+            vol0 = powf(fader / factor, power);
         } else {
-            vol = 1.0f;
+            vol0 = 1.0f;
+            vol1 = powf((1.0f - fader) / factor, power);
         }
+        if (vol0 > 1.0f) vol0 = 1.0f;
+        if (vol1 > 1.0f) vol1 = 1.0f;
 
-        int py = y + h - (int)(vol * h);
-        if (py < y) py = y;
-        if (prev_y_val >= 0)
-            oled_draw_line(x + i - 1, prev_y_val, x + i, py, THEME_DECK1_ACCENT);
-        prev_y_val = py;
-    }
-
-    /* Draw decay indicator: vertical dashed line showing open time */
-    if (decay > 0.0f && decay < 0.05f) {
-        /* Map decay time to pixels: 50ms = full width, show as % */
-        int dx = (int)(decay / 0.05f * w);
-        if (dx < 2) dx = 2;
-        if (dx > w) dx = w;
-        for (int dy = 0; dy < h; dy += 4) {
-            st7789_pixel(x + dx, y + dy, THEME_CUE3_COLOR);
-            st7789_pixel(x + dx, y + dy + 1, THEME_CUE3_COLOR);
+        int py0 = y + h - (int)(vol0 * h);
+        int py1 = y + h - (int)(vol1 * h);
+        if (prev0 >= 0) {
+            oled_draw_line(x + i - 1, prev1, x + i, py1, THEME_DECK2_ACCENT);
+            oled_draw_line(x + i - 1, prev0, x + i, py0, THEME_DECK1_ACCENT);
         }
-        /* Label */
-        char ms_str[16];
-        snprintf(ms_str, sizeof(ms_str), "%.0fms", decay * 1000.0f);
-        st7789_draw_string(x + dx + 3, y, ms_str, THEME_CUE3_COLOR, FONT_SMALL);
+        prev0 = py0;
+        prev1 = py1;
     }
 }
 
