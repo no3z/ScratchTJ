@@ -350,12 +350,14 @@ The slip ring is built into the rotor hub of the encoder mount:
 
 ### Touch thresholds
 
-Configured via the on-device menu (Config > Global Settings):
+Set in the on-device menu, *Config > Platter*:
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `cap_threshold` | 5000 | Reading above this = touched |
-| `cap_hysteresis` | 500 | Band between touch-on and touch-off to prevent flicker |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Touch threshold | 5000 | A reading above this counts as touched. The edit screen shows the live sensor reading, so you can set it halfway between hand off and hand on |
+| Touch by motion | Off | A turning platter counts as touched. A workaround while the touch circuit is broken |
+
+See [SETTINGS.md](SETTINGS.md#touch-threshold).
 
 Touch state gates scratch behavior -- platter movement only affects audio when the platter is being touched (depending on mode).
 

@@ -85,7 +85,8 @@ Key source files:
 | `software/cues.c` | Cue point system with per-track save/load |
 | `software/lcd_menu.c` | TFT display, rotary encoder menu navigation |
 | `software/deck_menu.c` | Per-deck menu: file browse, transport, cue screen, recording |
-| `software/controller_menu.c` | Config menu: Sound Settings, Global Settings, Info |
+| `software/controller_menu.c` | Config menu: Sound Settings, Platter, Fader & Volume, Screen, save / reset |
+| `software/settings.c` | Every setting: key, label, range, default, plain-English help |
 | `software/preset_menu.c` | 3-slot preset save/load (compiled, not yet wired into menu) |
 | `software/shared_variables.c` | Thread-safe runtime variable system for menu-tunable parameters |
 

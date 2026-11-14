@@ -224,22 +224,14 @@ ffmpeg -y -i mono.wav -ar 44100 -ac 2 \
 
 Edit `scsettings.txt` in the software directory, or use the on-device Controller menu.
 
-### Key Parameters
+### Settings
 
-| Parameter | Default | Range | Description |
-|---|---|---|---|
-| `platterspeed` | 9100 | 1 - 32768 | Encoder-to-audio position ratio |
-| `brakespeed` | 3000 | 1 - 10000 | Stop button deceleration rate |
-| `slippiness` | 200 | 1 - 3000 | Slipmat simulation feel |
-| `target_pitch` | 40 | 1 - 240 | Position tracking gain |
-| `blipthreshold` | 400 | 50 - 2048 | Encoder glitch rejection threshold |
-| `pitch_filter` | 0.1 | 0.01 - 1.0 | Pitch low-pass filter |
-| `Fad Factor` | 0.1 | 0.01 - 10 | Fader curve transition point |
-| `Fad Power` | 0.2 | 0.01 - 10 | Fader curve exponent |
-| `fader_sharp` | 1.0 | 0 - 1.0 | Fader sharpness |
-| `vel_ff` | 1.0 | 0 - 1.0 | Platter velocity feed-forward (1 = locked to the hand, 0 = original SC1000 tracking) |
-| `motion_touch` | 0 | 0 - 1 | 1 = a moving platter counts as touched (play without the capacitive touch sensor) |
-| `platterenabled` | 1 | 0 - 1 | Enable/disable platter |
+Most settings are changed live from the on-device *Config* menu (*Platter*,
+*Fader & Volume*, *Screen*) and saved to `~/.scratchtj/config.cfg`. That file
+overrides `scsettings.txt`.
+
+[SETTINGS.md](SETTINGS.md) explains every setting, its default and its
+`scsettings.txt` / `config.cfg` key.
 
 ### Presets
 

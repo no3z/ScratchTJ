@@ -43,8 +43,6 @@ ScratchTJ works out each setting's value in three layers. Each layer overrides t
 
 **Reset Defaults** goes back to layer 2. That means the built-in values, except where `scsettings.txt` sets something.
 
-Presets (Main Menu > Presets) store all of these settings together with the loaded tracks.
-
 ---
 
 ## Platter
@@ -291,7 +289,7 @@ Settings that also appear in the Config menu only give the **default** here. A v
 
 ## config.cfg keys
 
-`~/.scratchtj/config.cfg` and the presets use these keys. You can edit the file by hand while the program is not running. Unknown keys are ignored, and values outside the allowed range are brought back inside it.
+`~/.scratchtj/config.cfg` uses these keys. You can edit the file by hand while the program is not running. Unknown keys are ignored, and values outside the allowed range are brought back inside it.
 
 | Key | Menu name | Range |
 |-----|-----------|-------|
